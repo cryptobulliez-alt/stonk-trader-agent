@@ -29,6 +29,7 @@ import { getAssetBySymbol } from "../assets.js";
 import { priceTokenUsd } from "../prices.js";
 import { formatEther } from "viem";
 import { ownerAccount } from "../config.js";
+import { isRpcRateLimitError, summarizeRpcError } from "../rpcTransport.js";
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let passInFlight = false;
@@ -694,9 +695,15 @@ async function runPass(): Promise<void> {
 
     setAgentState("idle", "Pass complete");
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    setAgentState("error", msg);
-    emitEvent("agent.error", msg);
+    const msg = summarizeRpcError(err);
+    if (isRpcRateLimitError(err)) {
+      // Don't dump the full viem request — soft-fail and wait for next interval
+      setAgentState("idle", msg);
+      emitEvent("agent.warn", msg);
+    } else {
+      setAgentState("error", msg);
+      emitEvent("agent.error", msg);
+    }
   } finally {
     passInFlight = false;
   }

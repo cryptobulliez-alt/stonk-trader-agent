@@ -2,13 +2,13 @@ import {
   createPublicClient,
   createWalletClient,
   defineChain,
-  http,
   type Account,
   type Hex,
   type PublicClient,
   type WalletClient,
 } from "viem";
 import { CHAIN_ID, EXPLORER_URL } from "./config.js";
+import { rhHttpTransport } from "./rpcTransport.js";
 
 export const robinhoodChain = defineChain({
   id: CHAIN_ID,
@@ -29,13 +29,7 @@ export const robinhoodChain = defineChain({
 });
 
 export function createClients(rpcUrl: string, account: Account): Clients {
-  const transport = http(rpcUrl, {
-    fetchOptions: {
-      headers: {
-        "User-Agent": "stonk-trader/1.0",
-      },
-    },
-  });
+  const transport = rhHttpTransport(rpcUrl);
 
   const publicClient = createPublicClient({
     chain: robinhoodChain,

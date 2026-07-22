@@ -2,7 +2,6 @@ import {
   createPublicClient,
   formatUnits,
   getAddress,
-  http,
   zeroAddress,
   type Address,
   type PublicClient,
@@ -18,6 +17,7 @@ import {
   resolveToken,
 } from "./config.js";
 import { multicallBalanceOf } from "./multicall.js";
+import { rhHttpTransport } from "./rpcTransport.js";
 import { findBestEthStockPool } from "./v4.js";
 import {
   ACTIVATION_TIERS,
@@ -33,9 +33,7 @@ import {
 export function makePublicClient(rpcUrl?: string): PublicClient {
   return createPublicClient({
     chain: robinhoodChain,
-    transport: http(rpcUrl || process.env.RH_RPC_URL || "https://rpc.mainnet.chain.robinhood.com", {
-      fetchOptions: { headers: { "User-Agent": "stonk-trader-mcp/1.0" } },
-    }),
+    transport: rhHttpTransport(rpcUrl),
   });
 }
 

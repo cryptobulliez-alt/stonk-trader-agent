@@ -18,26 +18,56 @@ export type BrokerSession = {
   tba: Address;
 };
 
+type BrokerIdentityCache = {
+  tokenId: string;
+  tba: Address;
+  nftOwner: Address;
+  at: number;
+};
+
+let brokerIdentityCache: BrokerIdentityCache | null = null;
+const BROKER_IDENTITY_TTL_MS = 60_000;
+
 export async function connectBroker(config: AppConfig): Promise<BrokerSession> {
   const account = ownerAccount(config.privateKey);
   const clients = createClients(config.rpcUrl, account);
+  const tokenKey = String(config.tokenId);
 
-  const [tbaRaw, nftOwner] = await Promise.all([
-    clients.publicClient.readContract({
-      address: STONKBROKERS_ADDRESS,
-      abi: stonkBrokersAbi,
-      functionName: "tokenWallet",
-      args: [config.tokenId],
-    }),
-    clients.publicClient.readContract({
-      address: STONKBROKERS_ADDRESS,
-      abi: stonkBrokersAbi,
-      functionName: "ownerOf",
-      args: [config.tokenId],
-    }),
-  ]);
+  let tba: Address;
+  let nftOwner: Address;
 
-  const tba = getAddress(tbaRaw);
+  if (
+    brokerIdentityCache &&
+    brokerIdentityCache.tokenId === tokenKey &&
+    Date.now() - brokerIdentityCache.at < BROKER_IDENTITY_TTL_MS
+  ) {
+    tba = brokerIdentityCache.tba;
+    nftOwner = brokerIdentityCache.nftOwner;
+  } else {
+    const [tbaRaw, ownerRaw] = await Promise.all([
+      clients.publicClient.readContract({
+        address: STONKBROKERS_ADDRESS,
+        abi: stonkBrokersAbi,
+        functionName: "tokenWallet",
+        args: [config.tokenId],
+      }),
+      clients.publicClient.readContract({
+        address: STONKBROKERS_ADDRESS,
+        abi: stonkBrokersAbi,
+        functionName: "ownerOf",
+        args: [config.tokenId],
+      }),
+    ]);
+    tba = getAddress(tbaRaw);
+    nftOwner = getAddress(ownerRaw);
+    brokerIdentityCache = {
+      tokenId: tokenKey,
+      tba,
+      nftOwner,
+      at: Date.now(),
+    };
+  }
+
   if (tba === zeroAddress) {
     throw new Error(
       `No TBA found for StonkBroker #${config.tokenId}. Confirm the token exists on ${STONKBROKERS_ADDRESS}.`,

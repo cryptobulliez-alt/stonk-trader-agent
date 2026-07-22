@@ -293,7 +293,7 @@ async function callOpenAi(config: AppConfig, user: string): Promise<LlmPlan> {
           role: "system",
           content:
             SYSTEM +
-            "\nRespond JSON: {thesis, preferBuys: string[], preferSells: string[], stance}",
+            "\nRespond JSON only: {thesis, preferBuys: string[], preferSells: string[], stance}. Escape quotes inside thesis. Keep thesis under 400 chars.",
         },
         { role: "user", content: user },
       ],
@@ -319,10 +319,10 @@ async function callAnthropic(config: AppConfig, user: string): Promise<LlmPlan> 
     },
     body: JSON.stringify({
       model,
-      max_tokens: 500,
+      max_tokens: 800,
       system:
         SYSTEM +
-        "\nRespond with JSON only: {thesis, preferBuys: string[], preferSells: string[], stance}",
+        "\nRespond with a single JSON object only (no markdown). Keys: thesis (string), preferBuys (string[]), preferSells (string[]), stance (risk_on|risk_off|hold). Escape any quotes inside thesis with \\\". Keep thesis under 400 chars.",
       messages: [{ role: "user", content: user }],
     }),
   });
@@ -336,14 +336,63 @@ async function callAnthropic(config: AppConfig, user: string): Promise<LlmPlan> 
   return parsePlan(text);
 }
 
-function parsePlan(raw: string): LlmPlan {
-  const cleaned = raw.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
-  const obj = JSON.parse(cleaned) as {
-    thesis?: string;
-    preferBuys?: string[];
-    preferSells?: string[];
-    stance?: string;
-  };
+function extractJsonObject(raw: string): string {
+  let s = raw.trim();
+  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start >= 0 && end > start) s = s.slice(start, end + 1);
+  return s;
+}
+
+function softenJson(s: string): string {
+  return s
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/,\s*([}\]])/g, "$1");
+}
+
+function matchStringArray(raw: string, key: string): string[] {
+  const re = new RegExp(`"${key}"\\s*:\\s*\\[([\\s\\S]*?)\\]`, "i");
+  const m = raw.match(re);
+  if (!m) return [];
+  return [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1].toUpperCase());
+}
+
+/** Last-resort field scrape when the model breaks JSON quoting in thesis. */
+function parsePlanLoose(raw: string): LlmPlan {
+  const preferBuys = matchStringArray(raw, "preferBuys").slice(0, 2);
+  const preferSells = matchStringArray(raw, "preferSells").slice(0, 2);
+  const stanceMatch = raw.match(
+    /"stance"\s*:\s*"(risk_on|risk_off|hold)"/i,
+  );
+  const stanceRaw = (stanceMatch?.[1] ?? "hold").toLowerCase();
+  const stance: LlmPlan["stance"] =
+    stanceRaw === "risk_on" || stanceRaw === "risk_off" ? stanceRaw : "hold";
+
+  let thesis = "Hold — no selective sleeve action.";
+  const thesisQuoted = raw.match(/"thesis"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  if (thesisQuoted?.[1]) {
+    thesis = thesisQuoted[1].replace(/\\"/g, '"').replace(/\\n/g, " ");
+  } else {
+    // Broken quotes inside thesis — take text until next known key
+    const loose = raw.match(
+      /"thesis"\s*:\s*"([\s\S]*?)"\s*,\s*"(preferBuys|preferSells|stance)"/i,
+    );
+    if (loose?.[1]) {
+      thesis = loose[1].replace(/\s+/g, " ").trim().slice(0, 500);
+    }
+  }
+
+  return { thesis, preferBuys, preferSells, stance };
+}
+
+function normalizePlan(obj: {
+  thesis?: string;
+  preferBuys?: string[];
+  preferSells?: string[];
+  stance?: string;
+}): LlmPlan {
   const stanceRaw = (obj.stance ?? "hold").toLowerCase();
   const stance: LlmPlan["stance"] =
     stanceRaw === "risk_on" || stanceRaw === "risk_off" ? stanceRaw : "hold";
@@ -355,11 +404,25 @@ function parsePlan(raw: string): LlmPlan {
     : [];
   return {
     thesis:
-      typeof obj.thesis === "string"
-        ? obj.thesis
+      typeof obj.thesis === "string" && obj.thesis.trim()
+        ? obj.thesis.trim()
         : "Hold — no selective sleeve action.",
     preferBuys: preferBuys.slice(0, 2),
     preferSells: preferSells.slice(0, 2),
     stance,
   };
+}
+
+function parsePlan(raw: string): LlmPlan {
+  const extracted = extractJsonObject(raw);
+  const candidates = [extracted, softenJson(extracted)];
+  for (const candidate of candidates) {
+    try {
+      return normalizePlan(JSON.parse(candidate));
+    } catch {
+      /* try next */
+    }
+  }
+  // Model often breaks JSON by putting unescaped " inside thesis — scrape fields
+  return parsePlanLoose(raw);
 }

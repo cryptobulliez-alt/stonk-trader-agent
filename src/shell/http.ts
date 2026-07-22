@@ -104,7 +104,37 @@ type BalancesSnap = {
 };
 
 let balancesCache: BalancesSnap | null = null;
-const BALANCES_TTL_MS = 8_000;
+const BALANCES_TTL_MS = 30_000;
+
+/** Short-lived TBA cache so status + portfolio don't each re-call tokenWallet. */
+let tbaCache: { tokenId: string; tba: string; at: number } | null = null;
+const TBA_TTL_MS = 60_000;
+
+async function resolveTbaCached(
+  client: ReturnType<typeof makePublicClient>,
+  tokenId: bigint,
+): Promise<string | null> {
+  const key = String(tokenId);
+  if (
+    tbaCache &&
+    tbaCache.tokenId === key &&
+    Date.now() - tbaCache.at < TBA_TTL_MS
+  ) {
+    return tbaCache.tba;
+  }
+  const tbaRaw = await client.readContract({
+    address: STONKBROKERS_ADDRESS,
+    abi: stonkBrokersAbi,
+    functionName: "tokenWallet",
+    args: [tokenId],
+  });
+  const tba = String(tbaRaw);
+  if (!tba || tba === "0x0000000000000000000000000000000000000000") {
+    return null;
+  }
+  tbaCache = { tokenId: key, tba, at: Date.now() };
+  return tba;
+}
 
 async function loadBalances(): Promise<BalancesSnap | null> {
   const now = Date.now();
@@ -120,14 +150,8 @@ async function loadBalances(): Promise<BalancesSnap | null> {
     let tba: string | null = null;
     let tbaEth: number | null = null;
     try {
-      const tbaRaw = await client.readContract({
-        address: STONKBROKERS_ADDRESS,
-        abi: stonkBrokersAbi,
-        functionName: "tokenWallet",
-        args: [config.tokenId],
-      });
-      tba = String(tbaRaw);
-      if (tba && tba !== "0x0000000000000000000000000000000000000000") {
+      tba = await resolveTbaCached(client, config.tokenId);
+      if (tba) {
         const tbaBal = await client.getBalance({
           address: tba as `0x${string}`,
         });
