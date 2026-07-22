@@ -1,0 +1,33 @@
+# Stonk Trader Shell
+
+Local permissionless StonkBroker TBA agent on Robinhood Chain.
+
+## Run
+
+```
+npm install && npm run web:install
+cp .env.example .env
+npm run shell
+```
+
+Dashboard http://localhost:3000 · API http://127.0.0.1:8788
+
+## Secrets (.env only)
+
+PRIVATE_KEY, STONK_TOKEN_ID, LLM_API_KEY, X_API_*, DRY_RUN
+
+## Settings (data/settings.json)
+
+policy=core, reserveWethPct=70, deployPct, allowlist, maxNotionalEth, armed
+
+Broadcast requires armed=true AND DRY_RUN=false.
+
+## Engines
+
+Uniswap v4 UniversalRouter preferred; V3 fallback. Universe: data/assets.json (96 tokens).
+
+## MCP
+
+npm run mcp — prepare_broker_trade, analyze_broker_portfolio, prepare_portfolio_rebalance, post_trade_to_x
+
+Never use Robinhood place_* for TBA execution.

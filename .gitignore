@@ -1,0 +1,13 @@
+node_modules/
+apps/web/node_modules/
+apps/web/.next/
+apps/web/tsconfig.tsbuildinfo
+dist/
+.env
+data/settings.json
+data/portfolio-history.json
+data/cost-basis.json
+data/trade-log.json
+.stonk-trader/
+*.log
+.DS_Store

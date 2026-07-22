@@ -1,0 +1,42 @@
+{
+  "name": "stonk-trader",
+  "version": "1.0.0",
+  "description": "Local permissionless StonkBroker TBA agent shell — Uniswap v4 trades on Robinhood Chain + optional X posts + Next.js dashboard.",
+  "type": "module",
+  "bin": {
+    "stonk-trader": "./dist/index.js",
+    "stonk-trader-mcp": "./dist/mcp/stdio.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "portfolio": "tsx src/index.ts portfolio",
+    "trade": "tsx src/index.ts trade",
+    "watch": "tsx src/index.ts watch",
+    "manage": "tsx src/index.ts manage",
+    "mcp": "tsx src/mcp/stdio.ts",
+    "mcp:http": "tsx src/mcp/http.ts",
+    "shell:api": "tsx src/shell/http.ts",
+    "shell": "node scripts/shell.mjs",
+    "web": "npm run dev --prefix apps/web",
+    "web:install": "npm install --prefix apps/web",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "commander": "^14.0.0",
+    "dotenv": "^17.2.1",
+    "twitter-api-v2": "^1.24.0",
+    "viem": "^2.33.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  }
+}

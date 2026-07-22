@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "robinhood-trading": {
+      "url": "https://agent.robinhood.com/mcp/trading"
+    },
+    "stonk-trader": {
+      "command": "npx",
+      "args": ["tsx", "src/mcp/stdio.ts"]
+    },
+    "x-docs": {
+      "url": "https://docs.x.com/mcp"
+    },
+    "xapi": {
+      "url": "https://api.x.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:X_BEARER_TOKEN}"
+      }
+    }
+  }
+}

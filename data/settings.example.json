@@ -1,0 +1,17 @@
+{
+  "policy": "core",
+  "reserveWethPct": 70,
+  "deployPct": 15,
+  "intervalMs": 300000,
+  "allowlist": ["NVDA", "AAPL", "AMZN", "TSLA", "META", "GOOGL", "MSFT", "PLTR"],
+  "maxNotionalEth": 0.05,
+  "maxActionsPerPass": 2,
+  "postToX": true,
+  "thesis": "",
+  "dryRun": true,
+  "minNotionalUsd": 25,
+  "minEdgeBps": 40,
+  "takeProfitPct": 3,
+  "stopLossPct": 2.5,
+  "addOnlyDipBps": 50
+}
