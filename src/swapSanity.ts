@@ -6,7 +6,7 @@ import { formatUnits, parseUnits, type Address, type PublicClient } from "viem";
 import { getEthUsd, priceTokenUsd } from "./prices.js";
 
 /** Refuse to build a swap if exec quote is worse than mark by more than this. */
-export const MAX_EXEC_VS_MARK_BPS = 500; // 5%
+export const MAX_EXEC_VS_MARK_BPS = 100; // 1%
 
 export type SwapSanityOk = {
   ok: true;
