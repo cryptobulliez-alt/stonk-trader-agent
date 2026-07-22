@@ -30,6 +30,8 @@ import { ownerAccount } from "../config.js";
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let passInFlight = false;
+/** Epoch ms when the next scheduled pass should start; null while idle/paused or mid-pass. */
+let nextPassAt: number | null = null;
 
 export function startAutopilot() {
   setRunning(true);
@@ -43,7 +45,15 @@ export function pauseAutopilot() {
     clearTimeout(timer);
     timer = null;
   }
+  nextPassAt = null;
   setAgentState("paused", "Autopilot paused");
+}
+
+export function getAutopilotSchedule() {
+  return {
+    nextPassAt,
+    passInFlight,
+  };
 }
 
 export async function runOnce(): Promise<void> {
@@ -52,7 +62,19 @@ export async function runOnce(): Promise<void> {
 
 function scheduleNext(delayMs: number) {
   if (timer) clearTimeout(timer);
-  if (!isRunning()) return;
+  if (!isRunning()) {
+    nextPassAt = null;
+    return;
+  }
+  const wait = Math.max(0, delayMs);
+  nextPassAt = Date.now() + wait;
+  emitEvent(
+    "agent.schedule",
+    wait === 0
+      ? "Next check starting now"
+      : `Next check in ${Math.round(wait / 1000)}s`,
+    { nextPassAt, delayMs: wait },
+  );
   timer = setTimeout(() => {
     void (async () => {
       try {
@@ -61,10 +83,12 @@ function scheduleNext(delayMs: number) {
         if (isRunning()) {
           const settings = loadSettings();
           scheduleNext(settings.intervalMs);
+        } else {
+          nextPassAt = null;
         }
       }
     })();
-  }, delayMs);
+  }, wait);
 }
 
 async function runPass(): Promise<void> {
@@ -73,6 +97,7 @@ async function runPass(): Promise<void> {
     return;
   }
   passInFlight = true;
+  nextPassAt = null;
   try {
     const settings = loadSettings();
     const config = loadConfig();

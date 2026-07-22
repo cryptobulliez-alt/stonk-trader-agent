@@ -13,6 +13,7 @@ import {
 } from "../portfolioManage.js";
 import { connectBroker } from "../tba.js";
 import {
+  getAutopilotSchedule,
   pauseAutopilot,
   runOnce,
   startAutopilot,
@@ -170,6 +171,7 @@ async function handle(
       const env = loadEnvStatus();
       const settings = loadSettings();
       const runtime = snapshotRuntime();
+      const schedule = getAutopilotSchedule();
       const balances = await loadBalancesBounded();
       const lastError =
         runtime.lastError && runtime.lastError.length > 280
@@ -193,6 +195,8 @@ async function handle(
           running: runtime.running,
           lastThesis: runtime.lastThesis,
           lastError,
+          nextPassAt: schedule.nextPassAt,
+          passInFlight: schedule.passInFlight,
         },
         balances,
         events: runtime.events,

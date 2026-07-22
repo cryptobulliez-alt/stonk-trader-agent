@@ -79,6 +79,8 @@ type Status = {
     running: boolean;
     lastThesis: string;
     lastError: string | null;
+    nextPassAt?: number | null;
+    passInFlight?: boolean;
   };
   balances?: {
     eoa: string;
@@ -124,6 +126,7 @@ type ShellEvent = {
   ts: number;
   type: string;
   message: string;
+  data?: unknown;
 };
 
 type Asset = {
@@ -628,6 +631,18 @@ function LoadingBars({ className = "" }: { className?: string }) {
   );
 }
 
+/** Format remaining ms as H:MM:SS or M:SS. */
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>("live");
   const [status, setStatus] = useState<Status | null>(null);
@@ -646,6 +661,7 @@ export default function HomePage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [loadingPortfolio, setLoadingPortfolio] = useState(true);
   const [loadingTrades, setLoadingTrades] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
   const portfolioInflight = useRef(0);
   const tradesInflight = useRef(0);
   const prevTab = useRef<Tab | null>(null);
@@ -764,6 +780,13 @@ export default function HomePage() {
     return () => clearInterval(id);
   }, [status?.agent.running]);
 
+  // Local tick for next-pass countdown (smooth; nextPassAt comes from status)
+  useEffect(() => {
+    if (!status?.agent.running) return;
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [status?.agent.running]);
+
   // SSE direct to shell API (Next rewrites break EventSource)
   useEffect(() => {
     const shell =
@@ -817,6 +840,41 @@ export default function HomePage() {
   const shellBooting =
     status == null || (portfolio == null && loadingPortfolio);
   const statsBooting = portfolio == null && loadingPortfolio;
+
+  const passInFlight = Boolean(status?.agent.passInFlight);
+  // Prefer server schedule; fall back to last "Pass complete" + intervalMs
+  const nextPassAt = (() => {
+    if (!status?.agent.running) return null;
+    if (status.agent.nextPassAt != null) return status.agent.nextPassAt;
+    if (passInFlight) return null;
+    const interval = status.settings.intervalMs;
+    if (!(interval > 0)) return null;
+    const lastComplete = [...events]
+      .reverse()
+      .find(
+        (e) =>
+          e.type === "agent.state" &&
+          /pass complete/i.test(e.message),
+      );
+    if (lastComplete) return lastComplete.ts + interval;
+    const scheduled = [...events]
+      .reverse()
+      .find((e) => e.type === "agent.schedule");
+    const fromEv = (scheduled?.data as { nextPassAt?: number } | undefined)
+      ?.nextPassAt;
+    return fromEv != null ? fromEv : null;
+  })();
+  const nextPassRemainingMs =
+    nextPassAt != null ? Math.max(0, nextPassAt - now) : null;
+  const showNextCheck = Boolean(status?.agent.running);
+  const nextCheckValue = !showNextCheck
+    ? null
+    : passInFlight
+      ? "…"
+      : nextPassAt != null
+        ? formatCountdown(nextPassRemainingMs ?? 0)
+        : "—";
+  const nextCheckLabel = passInFlight ? "Pass in progress" : "Next check";
 
   const tba = broker?.tba ?? portfolio?.broker.tba ?? null;
   const owner = broker?.owner ?? portfolio?.broker.owner ?? null;
@@ -1183,6 +1241,21 @@ export default function HomePage() {
             >
               {settingsDraft?.dryRun !== false ? "Dry run: ON" : "Dry run: OFF"}
             </button>
+            {showNextCheck ? (
+              <div
+                className="countdown-slot"
+                title={
+                  passInFlight
+                    ? "Autopilot pass in progress"
+                    : nextPassAt != null
+                      ? `Next check at ${new Date(nextPassAt).toLocaleTimeString()}`
+                      : "Waiting for schedule"
+                }
+              >
+                <div className="countdown-value">{nextCheckValue}</div>
+                <div className="countdown-label">{nextCheckLabel}</div>
+              </div>
+            ) : null}
           </div>
 
           {error && (

@@ -442,7 +442,33 @@ button {
 .btn-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+
+.countdown-slot {
+  margin-left: auto;
+  min-width: 140px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-subtle);
+  text-align: right;
+}
+
+.countdown-value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+}
+
+.countdown-label {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .btn {
@@ -730,6 +756,7 @@ button {
   border-color: var(--danger);
   color: var(--danger);
 }
+
 
 .footer {
   margin-top: auto;
