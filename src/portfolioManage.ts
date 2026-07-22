@@ -236,15 +236,19 @@ export type ManageOpts = {
   trimPct?: number;
   targetWethPct?: number;
   maxNamePct?: number;
-  /** Keep at least this % in WETH (default 70 — do not dump the book). */
+  /** Keep at least this % in WETH (default 30). */
   reserveWethPct?: number;
   /** Max % of total portfolio to deploy in one manage pass (default 15). */
   deployPct?: number;
-  /** Symbols to buy into for deploy / equal_weight expansion. */
+  /** Candidate universe (allowlist) — not an equal-weight buy list. */
   symbols?: string[];
   /** Explicit target weights from research, e.g. { NVDA: 40, AAPL: 40, WETH: 20 }. */
   targets?: string | TargetWeights;
   thesis?: string;
+  /** Selective buys this pass (from LLM / thesis) — subset of allowlist. */
+  preferBuys?: string[];
+  /** Discretionary trims this pass (trend break) — subset of held names. */
+  preferSells?: string[];
   /** Unrealized P&L % by symbol — prefer trimming winners when raising cash. */
   unrealizedPnlPct?: Record<string, number>;
   /** Avg cost USD by symbol (for dip-only adds). */
@@ -353,9 +357,9 @@ export async function analyzeBrokerPortfolio(
     policy,
     trimSymbol: opts.trimSymbol,
     trimPct: opts.trimPct ?? 10,
-    targetWethPct: opts.targetWethPct ?? 70,
+    targetWethPct: opts.targetWethPct ?? 30,
     maxNamePct: opts.maxNamePct ?? 40,
-    reserveWethPct: opts.reserveWethPct ?? 70,
+    reserveWethPct: opts.reserveWethPct ?? 30,
     deployPct: opts.deployPct ?? 15,
     contentsUsd,
     cashUsd,
@@ -369,6 +373,8 @@ export async function analyzeBrokerPortfolio(
     takeProfitPct: opts.takeProfitPct,
     stopLossPct: opts.stopLossPct,
     addOnlyDipBps: opts.addOnlyDipBps,
+    preferBuys: opts.preferBuys,
+    preferSells: opts.preferSells,
   });
 
   return {
@@ -385,7 +391,7 @@ export async function analyzeBrokerPortfolio(
     ethUsd: ethUsd != null ? +ethUsd.toFixed(2) : null,
     cashUsd: +cashUsd.toFixed(2),
     cashPct: contentsUsd > 0 ? +((cashUsd / contentsUsd) * 100).toFixed(2) : 0,
-    targetCashPct: opts.reserveWethPct ?? 70,
+    targetCashPct: opts.reserveWethPct ?? 30,
     holdings: priced,
     contentsUsd: +contentsUsd.toFixed(2),
     unpricedAssets: unpriced.length ? unpriced : undefined,
@@ -481,6 +487,8 @@ function buildActions(
     takeProfitPct?: number;
     stopLossPct?: number;
     addOnlyDipBps?: number;
+    preferBuys?: string[];
+    preferSells?: string[];
   },
 ): PortfolioAction[] {
   const actions: PortfolioAction[] = [];
@@ -533,8 +541,11 @@ function buildActions(
         takeProfitPct: opts.takeProfitPct ?? 3,
         stopLossPct: opts.stopLossPct ?? 2.5,
         addOnlyDipBps: opts.addOnlyDipBps ?? 50,
+        maxNamePct: opts.maxNamePct,
+        preferBuys: opts.preferBuys,
+        preferSells: opts.preferSells,
       }),
-      `Core book on plan: ~${opts.reserveWethPct}% cash, stock sleeve diversified (±${BAND * 100}%)`,
+      `Core: ~${opts.reserveWethPct}% cash · selective sleeve (allowlist = candidates, not equal-weight)`,
     );
   }
 
@@ -780,20 +791,29 @@ function buildCoreActions(
     takeProfitPct: number;
     stopLossPct: number;
     addOnlyDipBps: number;
+    maxNamePct: number;
+    preferBuys?: string[];
+    preferSells?: string[];
   },
 ): PortfolioAction[] {
   const minN = opts.minNotionalUsd;
+  const maxNamePct = opts.maxNamePct > 0 ? opts.maxNamePct : 40;
   const targetCashUsd = opts.contentsUsd * (opts.reserveWethPct / 100);
-  const stockSleeveUsd = Math.max(0, opts.contentsUsd - targetCashUsd);
   let wethBudget = opts.wethBudget;
   const pnlOf = (sym: string) => opts.unrealizedPnlPct?.[sym.toUpperCase()] ?? 0;
   const avgOf = (sym: string) => opts.avgCostUsd?.[sym.toUpperCase()];
   const markOf = (sym: string) => opts.priceUsd?.[sym.toUpperCase()];
+  const universe = new Set(
+    (opts.buyUniverse.length
+      ? opts.buyUniverse
+      : tradeable.map((h) => h.symbol)
+    ).map((s) => s.toUpperCase()),
+  );
+  const bySym = new Map(tradeable.map((h) => [h.symbol.toUpperCase(), h]));
 
-  // Phase 1 — restore cash core (take risk off / bank sleeve profits)
+  // Phase 1 — restore cash core (liquidity first)
   if (opts.cashUsd < targetCashUsd * (1 - BAND)) {
     let need = targetCashUsd - opts.cashUsd;
-    // Prefer winners (high unrealized P&L %), then larger names
     const sorted = [...tradeable].sort((a, b) => {
       const pnlDiff = pnlOf(b.symbol) - pnlOf(a.symbol);
       if (Math.abs(pnlDiff) > 0.5) return pnlDiff;
@@ -801,18 +821,17 @@ function buildCoreActions(
     });
     for (const h of sorted) {
       if (need < minN || h.usd == null || h.usd <= 0) break;
-      // Prefer trimming winners/large names; never dump more than 60% of a name in one pass
       const sellUsd = Math.min(need, h.usd * 0.6);
       const pnl = pnlOf(h.symbol);
       const pnlNote =
-        opts.unrealizedPnlPct && h.symbol in opts.unrealizedPnlPct
+        opts.unrealizedPnlPct && h.symbol.toUpperCase() in opts.unrealizedPnlPct
           ? ` · uPnL ${pnl >= 0 ? "+" : ""}${pnl.toFixed(1)}%`
           : "";
       pushSell(
         actions,
         { symbol: h.symbol, amount: h.amount, usd: h.usd },
         sellUsd,
-        `Core: raise cash to ${opts.reserveWethPct}% — trim ${h.symbol}${pnlNote} (bank sleeve / free dry powder)${opts.thesisNote}`,
+        `Core: raise cash to ${opts.reserveWethPct}% — trim ${h.symbol}${pnlNote}${opts.thesisNote}`,
         1,
         minN,
       );
@@ -829,81 +848,75 @@ function buildCoreActions(
     return actions;
   }
 
-  // Phase 2 — stock sleeve: equal weight across buy universe (incl. open names)
-  const universe = opts.buyUniverse.length
-    ? opts.buyUniverse
-    : tradeable.map((h) => h.symbol);
-  if (!universe.length) {
-    actions.push({
-      action: "hold",
-      reason: `Cash core ok (~${opts.cashPct.toFixed(1)}%); no buyable stock universe`,
-      tradeable: true,
-      priority: 0,
-    });
-    return actions;
-  }
-
-  const perTarget = stockSleeveUsd / universe.length;
-  const bySym = new Map(tradeable.map((h) => [h.symbol, h]));
-
   const soldSyms = new Set<string>();
   const markSold = (sym: string) => soldSyms.add(sym.toUpperCase());
   const alreadySold = (sym: string) => soldSyms.has(sym.toUpperCase());
 
-  // Take-profit: trim winners at/above takeProfitPct toward sleeve target
+  // Hard exits — take-profit / stop-loss on held names
   for (const h of tradeable) {
     if (h.usd == null || h.usd < minN || alreadySold(h.symbol)) continue;
     const pnl = pnlOf(h.symbol);
-    if (pnl < opts.takeProfitPct) continue;
-    const target = universe.includes(h.symbol) ? perTarget : 0;
-    const excess = Math.max(0, h.usd - target);
-    if (excess < minN) continue;
-    const before = actions.length;
-    pushSell(
-      actions,
-      { symbol: h.symbol, amount: h.amount, usd: h.usd },
-      Math.min(excess, h.usd * 0.5),
-      `Core: take-profit ${h.symbol} (uPnL +${pnl.toFixed(1)}% ≥ ${opts.takeProfitPct}%)${opts.thesisNote}`,
-      1,
-      minN,
-    );
-    if (actions.length > before) markSold(h.symbol);
-  }
-
-  // Stop-loss: cut losers even when cash is fine (fee gate applied later in autopilot)
-  for (const h of tradeable) {
-    if (h.usd == null || h.usd < minN || alreadySold(h.symbol)) continue;
-    const pnl = pnlOf(h.symbol);
-    if (pnl > -opts.stopLossPct) continue;
-    const sellUsd = Math.min(h.usd * 0.5, Math.max(minN, h.usd * 0.25));
-    const before = actions.length;
-    pushSell(
-      actions,
-      { symbol: h.symbol, amount: h.amount, usd: h.usd },
-      sellUsd,
-      `Core: stop-loss ${h.symbol} (uPnL ${pnl.toFixed(1)}% ≤ -${opts.stopLossPct}%)${opts.thesisNote}`,
-      1,
-      minN,
-    );
-    if (actions.length > before) markSold(h.symbol);
-  }
-
-  // Trim names above their sleeve slot (concentration / leftover after TP)
-  for (const sym of universe) {
-    if (alreadySold(sym)) continue;
-    const h = bySym.get(sym);
-    if (!h || h.usd == null) continue;
-    if (h.usd > perTarget * (1 + BAND)) {
+    if (pnl >= opts.takeProfitPct) {
       const before = actions.length;
       pushSell(
         actions,
         { symbol: h.symbol, amount: h.amount, usd: h.usd },
-        h.usd - perTarget,
-        `Core: take profit / trim ${sym} toward $${perTarget.toFixed(2)} sleeve (${((1 - opts.reserveWethPct / 100) * 100).toFixed(0)}% book / ${universe.length} names)${opts.thesisNote}`,
+        Math.min(h.usd * 0.5, Math.max(minN, h.usd * 0.35)),
+        `Core: take-profit ${h.symbol} (uPnL +${pnl.toFixed(1)}% ≥ ${opts.takeProfitPct}%)${opts.thesisNote}`,
         1,
         minN,
       );
-      if (actions.length > before) markSold(sym);
+      if (actions.length > before) markSold(h.symbol);
+      continue;
+    }
+    if (pnl <= -opts.stopLossPct) {
+      const before = actions.length;
+      pushSell(
+        actions,
+        { symbol: h.symbol, amount: h.amount, usd: h.usd },
+        Math.min(h.usd * 0.5, Math.max(minN, h.usd * 0.35)),
+        `Core: stop-loss ${h.symbol} (uPnL ${pnl.toFixed(1)}% ≤ -${opts.stopLossPct}%)${opts.thesisNote}`,
+        1,
+        minN,
+      );
+      if (actions.length > before) markSold(h.symbol);
+    }
+  }
+
+  // Thesis / trend sells (discretionary)
+  const preferSells = (opts.preferSells ?? [])
+    .map((s) => s.toUpperCase())
+    .filter((s) => bySym.has(s) && !alreadySold(s));
+  for (const sym of preferSells) {
+    const h = bySym.get(sym)!;
+    if (h.usd == null || h.usd < minN) continue;
+    const before = actions.length;
+    pushSell(
+      actions,
+      { symbol: h.symbol, amount: h.amount, usd: h.usd },
+      Math.min(h.usd * 0.4, Math.max(minN, h.usd * 0.25)),
+      `Core: thesis trim ${sym} (trend / preferSells)${opts.thesisNote}`,
+      1,
+      minN,
+    );
+    if (actions.length > before) markSold(sym);
+  }
+
+  // Concentration cap vs maxNamePct (not equal-weight)
+  for (const h of tradeable) {
+    if (h.usd == null || alreadySold(h.symbol)) continue;
+    const capUsd = opts.contentsUsd * (maxNamePct / 100);
+    if (h.usd > capUsd * (1 + BAND)) {
+      const before = actions.length;
+      pushSell(
+        actions,
+        { symbol: h.symbol, amount: h.amount, usd: h.usd },
+        h.usd - capUsd,
+        `Core: concentration trim ${h.symbol} above ${maxNamePct}% of book${opts.thesisNote}`,
+        1,
+        minN,
+      );
+      if (actions.length > before) markSold(h.symbol);
     }
   }
 
@@ -912,18 +925,22 @@ function buildCoreActions(
     .reduce((s, a) => s + (a.notionalUsd ?? 0), 0);
   wethBudget += plannedSellUsd;
 
-  // Buy only with cash above the 70% reserve (plus this pass's sells), capped by deployPct
   const deployable = deployableUsd(
     opts.contentsUsd,
     wethBudget,
     opts.reserveWethPct,
     opts.deployPct,
   );
+
+  const preferBuys = (opts.preferBuys ?? [])
+    .map((s) => s.toUpperCase())
+    .filter((s) => universe.has(s));
+
   if (deployable < minN) {
     if (!actions.some((a) => a.action === "swap")) {
       actions.push({
         action: "hold",
-        reason: `Core on plan: cash ~${opts.cashPct.toFixed(1)}% (target ${opts.reserveWethPct}%), no sleeve buys without breaking reserve`,
+        reason: `Core on plan: cash ~${opts.cashPct.toFixed(1)}% (target ${opts.reserveWethPct}%), deployable $${deployable.toFixed(2)} < min notional $${minN}`,
         tradeable: true,
         priority: 0,
       });
@@ -931,52 +948,80 @@ function buildCoreActions(
     return actions;
   }
 
-  // Fund underweights / missing names from deployable budget (dip-only adds on existing)
-  const deficits: Array<{ sym: string; need: number }> = [];
-  for (const sym of universe) {
-    const current = bySym.get(sym)?.usd ?? 0;
-    if (current < perTarget * (1 - BAND)) {
-      const mark = markOf(sym);
-      const avg = avgOf(sym);
-      // Existing position: only add on a dip vs avg cost
-      if (current > 0 && avg != null && avg > 0 && mark != null) {
-        const maxAdd = avg * (1 - opts.addOnlyDipBps / 10_000);
-        if (mark > maxAdd) {
-          actions.push({
-            action: "hold",
-            reason: `Core: skip add ${sym} — mark $${mark.toFixed(4)} > avg $${avg.toFixed(4)} − ${opts.addOnlyDipBps}bps (no buy strength into fees)`,
-            tokenOut: sym,
-            tradeable: true,
-            priority: 0,
-          });
-          continue;
-        }
-      }
-      deficits.push({ sym, need: perTarget - current });
+  if (!preferBuys.length) {
+    if (!actions.some((a) => a.action === "swap")) {
+      actions.push({
+        action: "hold",
+        reason: `Core: no preferBuys this pass — allowlist is candidates only; need thesis/LLM pick before opening risk${opts.thesisNote}`,
+        tradeable: true,
+        priority: 0,
+      });
     }
+    return actions;
   }
-  const totalNeed = deficits.reduce((s, d) => s + d.need, 0);
-  if (totalNeed <= 0) return actions;
 
+  const picks = preferBuys.slice(0, 2);
   let budget = deployable;
-  for (const d of deficits) {
+  const perPick = budget / picks.length;
+
+  for (const sym of picks) {
     if (budget < minN) break;
-    const buyUsd = Math.min(d.need, budget * (d.need / totalNeed), budget);
+    const current = bySym.get(sym)?.usd ?? 0;
+    const capUsd = opts.contentsUsd * (maxNamePct / 100);
+    const room = Math.max(0, capUsd - current);
+    if (room < minN) {
+      actions.push({
+        action: "hold",
+        reason: `Core: skip buy ${sym} — already at/near ${maxNamePct}% name cap`,
+        tokenOut: sym,
+        tradeable: true,
+        priority: 0,
+      });
+      continue;
+    }
+
+    const mark = markOf(sym);
+    const avg = avgOf(sym);
+    if (current > 0 && avg != null && avg > 0 && mark != null) {
+      const maxAdd = avg * (1 - opts.addOnlyDipBps / 10_000);
+      if (mark > maxAdd) {
+        actions.push({
+          action: "hold",
+          reason: `Core: skip add ${sym} — mark $${mark.toFixed(4)} > avg $${avg.toFixed(4)} − ${opts.addOnlyDipBps}bps`,
+          tokenOut: sym,
+          tradeable: true,
+          priority: 0,
+        });
+        continue;
+      }
+    }
+
+    const buyUsd = Math.min(budget, perPick, room);
+    if (buyUsd < minN) continue;
     pushBuy(
       actions,
-      d.sym,
+      sym,
       buyUsd,
       opts.ethUsd,
       budget,
-      `Core: buy ${d.sym} toward $${perTarget.toFixed(2)} sleeve (cash above ${opts.reserveWethPct}% reserve)${opts.thesisNote}`,
+      `Core: selective buy ${sym} (thesis preferBuys · deploy ≤${opts.deployPct}%)${opts.thesisNote}`,
       2,
       minN,
     );
     const spent =
-      actions.filter((a) => a.side === "buy" && a.tokenOut === d.sym).at(-1)
+      actions.filter((a) => a.side === "buy" && a.tokenOut === sym).at(-1)
         ?.notionalUsd ?? 0;
     budget -= spent;
     wethBudget -= spent;
+  }
+
+  if (!actions.some((a) => a.action === "swap")) {
+    actions.push({
+      action: "hold",
+      reason: `Core: preferBuys ${picks.join(",")} but no fee-viable ticket this pass (min $${minN}, deployable $${deployable.toFixed(2)})`,
+      tradeable: true,
+      priority: 0,
+    });
   }
   return actions;
 }

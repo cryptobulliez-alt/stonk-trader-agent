@@ -67,7 +67,7 @@ program
   .option("--pct <pct>", "trim percent", "10")
   .option("--target-weth <pct>", "dry_powder WETH target %", "20")
   .option("--max-name <pct>", "max_name cap %", "40")
-  .option("--reserve-weth <pct>", "min % WETH to keep (default 70)", "70")
+  .option("--reserve-weth <pct>", "min % WETH to keep (default 30)", "30")
   .option("--deploy-pct <pct>", "max % of book to deploy per pass (default 15)", "15")
   .option("--symbols <list>", "buy universe, e.g. NVDA,AAPL,TSLA")
   .option("--targets <weights>", 'e.g. "NVDA:45,AAPL:40,WETH:15"')

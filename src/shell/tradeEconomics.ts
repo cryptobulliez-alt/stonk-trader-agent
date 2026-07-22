@@ -141,21 +141,36 @@ export function evaluateFeeGate(args: {
   }
 
   if (args.side === "buy") {
-    const need = cost.requiredEdgeUsd;
-    // Buys have no locked-in edge; require notional large enough that minEdge covers costs
-    if (args.notionalUsd * (args.minEdgeBps / 10_000) < cost.totalCostUsd) {
+    const edgeUsd = args.notionalUsd * (args.minEdgeBps / 10_000);
+    const edgeCoversRt = edgeUsd >= cost.totalCostUsd;
+    // Small books: don't require notional×bps ≥ RT cost (that needs huge tickets).
+    // Pass when the ticket clears min notional and is large vs entry friction.
+    const minVsEntry = Math.max(args.minNotionalUsd, cost.entryCostUsd * 10);
+    const ticketAffordable = args.notionalUsd >= minVsEntry;
+    const entryDrag = cost.entryCostUsd / args.notionalUsd;
+    if (entryDrag > 0.08) {
       return {
         ok: false,
-        reason: `fee gate: buy needs ≥$${cost.totalCostUsd.toFixed(2)} edge (gas+slip round-trip); notional×${args.minEdgeBps}bps too small`,
+        reason: `fee gate: buy $${args.notionalUsd.toFixed(2)} — entry fees $${cost.entryCostUsd.toFixed(2)} are ${(entryDrag * 100).toFixed(1)}% of ticket (max 8%)`,
         cost,
-        edgeUsd: args.notionalUsd * (args.minEdgeBps / 10_000),
+        edgeUsd,
+      };
+    }
+    if (edgeCoversRt || ticketAffordable) {
+      return {
+        ok: true,
+        reason: edgeCoversRt
+          ? `fee gate ok: buy $${args.notionalUsd.toFixed(2)} · edge $${edgeUsd.toFixed(2)} ≥ RT $${cost.totalCostUsd.toFixed(2)}`
+          : `fee gate ok: buy $${args.notionalUsd.toFixed(2)} · entry fees $${cost.entryCostUsd.toFixed(2)} (ticket ≥10× entry; RT est $${cost.totalCostUsd.toFixed(2)})`,
+        cost,
+        edgeUsd,
       };
     }
     return {
-      ok: true,
-      reason: `fee gate ok: buy notional $${args.notionalUsd.toFixed(2)} · est cost $${cost.totalCostUsd.toFixed(2)} (RT)`,
+      ok: false,
+      reason: `fee gate: buy $${args.notionalUsd.toFixed(2)} too small vs fees — need ≥$${minVsEntry.toFixed(2)} (10× entry $${cost.entryCostUsd.toFixed(2)}) or ${args.minEdgeBps}bps edge ≥ RT $${cost.totalCostUsd.toFixed(2)}`,
       cost,
-      edgeUsd: need,
+      edgeUsd,
     };
   }
 

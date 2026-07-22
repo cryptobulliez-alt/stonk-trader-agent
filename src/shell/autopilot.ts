@@ -16,7 +16,7 @@ import {
   setRunning,
 } from "./events.js";
 import { executePreparedSteps } from "./executeSteps.js";
-import { askLlmForThesis } from "./llm.js";
+import { askLlmForThesis, tickersFromText } from "./llm.js";
 import { recordSnapshot } from "./history.js";
 import {
   enrichHoldings,
@@ -158,13 +158,16 @@ async function runPass(): Promise<void> {
 
     let thesis =
       settings.thesis ||
-      `Core pass: target ${settings.reserveWethPct}% cash, deploy≤${settings.deployPct}%.`;
+      `Core pass: target ${settings.reserveWethPct}% cash, selective sleeve (allowlist = candidates).`;
+    let preferBuys: string[] = tickersFromText(settings.thesis, settings.allowlist);
+    let preferSells: string[] = [];
 
     if (config.llmApiKey) {
       setAgentState("thinking", "Asking LLM for thesis");
       try {
         const plan = await askLlmForThesis(config, {
           cashPct: preview.cashPct,
+          reserveWethPct: settings.reserveWethPct,
           holdings: holdings.map((h) => ({
             symbol: h.symbol,
             weightPct: h.weightPct,
@@ -181,12 +184,62 @@ async function runPass(): Promise<void> {
           addOnlyDipBps: settings.addOnlyDipBps,
         });
         if (plan?.thesis) thesis = plan.thesis;
+        if (plan?.preferBuys?.length) {
+          preferBuys = plan.preferBuys.filter((s) =>
+            settings.allowlist.includes(s),
+          );
+        } else if (plan?.stance === "hold" || plan?.stance === "risk_off") {
+          preferBuys = [];
+        }
+        if (plan?.preferSells?.length) {
+          preferSells = plan.preferSells.filter(
+            (s) =>
+              settings.allowlist.includes(s) ||
+              holdings.some((h) => h.symbol.toUpperCase() === s),
+          );
+        }
+        // Hard fallback: excess cash + LLM skipped unheld names → open one candidate
+        const cashPct = preview.cashPct ?? 0;
+        const excess = cashPct - settings.reserveWethPct;
+        if (
+          excess >= 10 &&
+          preferBuys.length === 0 &&
+          plan?.stance !== "risk_off"
+        ) {
+          const held = new Set(
+            holdings
+              .map((h) => h.symbol.toUpperCase())
+              .filter((s) => !["WETH", "ETH", "USDG", "STONKBROKER"].includes(s)),
+          );
+          const unheld = settings.allowlist.filter((s) => !held.has(s));
+          if (unheld.length) {
+            preferBuys = [unheld[0]];
+            emitEvent(
+              "agent.plan",
+              `fallback deploy: cash +${excess.toFixed(1)}pp over reserve → open ${preferBuys[0]} (unheld allowlist)`,
+              { preferBuys, reason: "cash_excess_fallback" },
+            );
+          }
+        }
+        if (plan) {
+          emitEvent(
+            "agent.plan",
+            `stance=${plan.stance} · buys=${preferBuys.join(",") || "—"} · sells=${preferSells.join(",") || "—"}`,
+            { stance: plan.stance, preferBuys, preferSells },
+          );
+        }
       } catch (err) {
         emitEvent(
           "agent.warn",
           err instanceof Error ? err.message : String(err),
         );
       }
+    } else if (preferBuys.length) {
+      emitEvent(
+        "agent.plan",
+        `no LLM — preferBuys from thesis notes: ${preferBuys.join(",")}`,
+        { preferBuys },
+      );
     }
 
     setLastThesis(thesis);
@@ -201,6 +254,8 @@ async function runPass(): Promise<void> {
       deployPct: settings.deployPct,
       symbols: settings.allowlist,
       thesis,
+      preferBuys,
+      preferSells,
       maxActions: settings.maxActionsPerPass,
       slippageBps: config.slippageBps,
       unrealizedPnlPct,
@@ -209,6 +264,7 @@ async function runPass(): Promise<void> {
       takeProfitPct: settings.takeProfitPct,
       stopLossPct: settings.stopLossPct,
       addOnlyDipBps: settings.addOnlyDipBps,
+      maxNamePct: 40,
     });
 
     const cashPct = preview.cashPct ?? 100;
@@ -278,9 +334,15 @@ async function runPass(): Promise<void> {
         typeof item.prepared.fundedBy === "string"
           ? item.prepared.fundedBy
           : undefined;
+      const fundNote =
+        fundedBy === "tba"
+          ? " · path: TBA-funded (EOA gas only)"
+          : fundedBy && fundedBy !== "n/a"
+            ? ` · path: ${fundedBy}`
+            : "";
       emitEvent(
         gate.ok ? "agent.fee" : "agent.skip",
-        `${gate.reason}${fundedBy ? ` · fund ${fundedBy}` : ""}`,
+        `${gate.reason}${fundNote}`,
         {
           side,
           notionalUsd,
@@ -298,6 +360,14 @@ async function runPass(): Promise<void> {
       `${capped.length} trade(s) ready (${swaps.length - capped.length} skipped by size/fee gate)`,
       { count: capped.length },
     );
+
+    if (capped.length === 0) {
+      const holdReason =
+        plan.analysis.actions.find((a) => a.action === "hold")?.reason ??
+        "No actionable swaps this pass";
+      // Defer hold emit to the branch below so fee-skipped plans get one clear line
+      void holdReason;
+    }
 
     const marks: Record<string, number | null | undefined> = {};
     for (const h of holdings) {
@@ -350,7 +420,10 @@ async function runPass(): Promise<void> {
     }
 
     if (capped.length === 0) {
-      emitEvent("agent.hold", "No actionable swaps this pass");
+      const holdReason =
+        plan.analysis.actions.find((a) => a.action === "hold")?.reason ??
+        "No actionable swaps this pass";
+      emitEvent("agent.hold", holdReason);
     } else if (!canBroadcast) {
       for (const item of capped) {
         const a = item.action;

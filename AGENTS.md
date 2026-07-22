@@ -1,6 +1,8 @@
 # Agent playbook — Stonk Trader Shell
 
-**Goal:** keep a **~70% WETH cash core**, run a diversified stock sleeve with the rest, take profits into cash, and redeploy selectively — aiming for profitable TBA management over time (no guarantees).
+**Goal:** keep a cash core at **`reserveWethPct` (default 30%)**, run a **selective** stock sleeve (trend thesis → 1–2 names), take profits / cut losses — aiming for profitable TBA management over time (no guarantees).
+
+**Trading doctrine:** see [`docs/TRADING.md`](docs/TRADING.md) (Investor.gov / CFA / exit-discipline references + agent rules).
 
 ## Host model
 
@@ -13,32 +15,35 @@ Default entry: `npm run shell` → dashboard at `http://localhost:3000` + API at
 | Rail | Surface | Use for |
 | --- | --- | --- |
 | A | `robinhood-trading` MCP (optional) | Quotes / research — **not** TBA execution |
-| B | This shell (dashboard / MCP / CLI) | TBA state, core rebalance, Uniswap prepare/sign, trade tweets |
+| B | This shell (dashboard / MCP / CLI) | TBA state, selective core, Uniswap prepare/sign, trade tweets |
 | C | X API / X MCP | Social edge + fill posts |
+| Docs | `docs/TRADING.md` | Best-practice rules injected into LLM + human operators |
 
 ## Autopilot loop
 
-Default policy: **`core`** (`reserveWethPct=70`, `deployPct≤15` per pass).
+Default policy: **`core`** (`reserveWethPct=30`, `deployPct≤15` per pass).
 
-1. Snapshot — `analyze_broker_portfolio` / manage
-   - If **cash < ~70%** → **sells only**
-   - If **cash ≈ 70%** → take-profit / stop-loss / trim overweight; buy underweights only with cash above reserve (dip-only adds vs avg cost)
-2. Optional LLM thesis (`LLM_API_KEY`)
-3. **Fee EV gate** — skip swaps unless notional ≥ `minNotionalUsd` and expected edge clears gas+slip (`minEdgeBps`); cash-restore sells can bypass uPnL edge
-4. Prepare — v4 UniversalRouter preferred; buys unwrap TBA WETH so owner outer `value=0` (EOA pays gas only)
-5. Sign — only if Dry run is OFF (`settings.dryRun=false`)
-6. Post — `post_trade_to_x` / shell X helper when configured
-7. Repeat on `intervalMs`
+1. Snapshot book + cost basis  
+2. **Thesis** — LLM (if keyed) returns `preferBuys` / `preferSells` / `stance`; else tickers named in Settings thesis notes  
+3. Core actions  
+   - Cash below reserve → **sells only**  
+   - Held names → **take-profit / stop-loss** (+ thesis sells)  
+   - Opens → **only** `preferBuys` (≤2), never equal-weight the whole allowlist  
+4. **Fee EV gate** — skip unless notional / edge clears gas+slip  
+5. Prepare (v4; TBA-funded buys) → sign if Dry run OFF → optional X  
+6. Repeat on `intervalMs`
 
-Fee defaults: `minNotionalUsd=25`, `minEdgeBps=40`, `takeProfitPct=3`, `stopLossPct=2.5`, `addOnlyDipBps=50`, `maxActionsPerPass=2`.
+**Allowlist = candidates**, not a must-buy list. Empty `preferBuys` → hold is correct.
+
+Fee defaults: `minNotionalUsd=3`, `minEdgeBps=10`, `takeProfitPct=3`, `stopLossPct=2.5`, `addOnlyDipBps=50`, `maxActionsPerPass=3`, `maxNotionalEth=0.01`.
 
 ## Policies
 
 | Policy | Use |
 | --- | --- |
-| **`core`** | Default autopilot — 70% cash, diversify stock sleeve |
-| `targets` | Research override weights (include `WETH:70`) |
-| `deploy` | Only when intentionally putting cash to work |
+| **`core`** | Default — cash reserve + selective sleeve |
+| `targets` | Explicit research weights (include enough WETH for reserve) |
+| `deploy` | Force deploy into symbols (manual) |
 | `trim` / `dry_powder` / `max_name` | Manual risk controls |
 
 ## Engines (B)
@@ -48,14 +53,14 @@ Fee defaults: `minNotionalUsd=25`, `minEdgeBps=40`, `takeProfitPct=3`, `stopLoss
 
 ## Universe
 
-`data/assets.json` — full Robinhood Chain stock-token list. Autopilot trades only the **allowlist** in settings (default mega-caps).
+`data/assets.json` — full Robinhood Chain stock-token list. Autopilot **considers** only the **allowlist**; it **buys** only thesis picks.
 
 ## Rules
 
+- Follow `docs/TRADING.md`.
 - Never `place_*` on Rail A for TBA management.
 - Never send TBA proceeds to the owner EOA.
-- **Buys spend TBA WETH/ETH** — fund the TBA wallet from `get_broker`; owner should not attach call value when TBA can fund.
-- Prefer hold over fee-negative micro-rebalances; Live shows `agent.skip` / `agent.fee` with cost vs edge.
-- Prefer `core` + small `deployPct` when unattended.
+- **Buys spend TBA WETH/ETH** — fund the TBA; EOA pays gas only.
+- Prefer hold over fee-negative or thesis-less opens.
 - Activation clears on transfer; liquid contents are removable until sale.
 - Not financial advice; stock tokens are geo-restricted.

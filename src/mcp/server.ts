@@ -89,7 +89,7 @@ export function createStonkBrokerMcpServer(): McpServer {
       .enum(["core", "equal_weight", "deploy", "targets", "trim", "dry_powder", "max_name"])
       .optional()
       .describe(
-        "core (default: keep ~70% WETH, trim profits, sleeve rest), equal_weight, deploy, targets, trim, dry_powder, max_name",
+        "core (default: keep ~reserveWethPct WETH, selective sleeve), equal_weight, deploy, targets, trim, dry_powder, max_name",
       ),
     trimSymbol: z.string().optional().describe("For trim policy"),
     trimPct: z.number().min(1).max(100).optional().describe("Default 10"),
@@ -100,7 +100,7 @@ export function createStonkBrokerMcpServer(): McpServer {
       .min(0)
       .max(100)
       .optional()
-      .describe("Min % WETH to keep (default 70)"),
+      .describe("Min % WETH to keep (default 30)"),
     deployPct: z
       .number()
       .min(1)
@@ -120,7 +120,7 @@ export function createStonkBrokerMcpServer(): McpServer {
 
   server.tool(
     "analyze_broker_portfolio",
-    "Manage TBA for profit-seeking agents. Default policy `core`: keep ~70% WETH, trim stock profits into cash, sleeve the rest; buys only above reserve. Pair with Robinhood/X research + thesis. Not a profit guarantee.",
+    "Manage TBA for profit-seeking agents. Default policy `core`: keep ~reserveWethPct WETH (default 30%), selective sleeve buys/sells above reserve. Pair with Robinhood/X research + thesis. Not a profit guarantee.",
     manageShape,
     async (args) => {
       try {

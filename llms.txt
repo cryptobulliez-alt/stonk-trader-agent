@@ -18,13 +18,19 @@ PRIVATE_KEY, STONK_TOKEN_ID, LLM_API_KEY, X_API_*, DRY_RUN
 
 ## Settings (data/settings.json)
 
-policy=core, reserveWethPct=70, deployPct, allowlist, maxNotionalEth, armed
+policy=core, reserveWethPct=30, deployPct=15, allowlist (candidates), minNotionalUsd=3, minEdgeBps=10, thesis notes
 
-Broadcast requires armed=true AND DRY_RUN=false.
+Broadcast when Dry run is OFF (dashboard toggle).
+
+## Decision doctrine
+
+See docs/TRADING.md — allowlist is candidates; buys need preferBuys from LLM/thesis; TP/SL exits; fee gate.
+
+AGENTS.md for loop + rails (LLM, X MCP, RH research MCP).
 
 ## Engines
 
-Uniswap v4 UniversalRouter preferred; V3 fallback. Universe: data/assets.json (96 tokens).
+Uniswap v4 UniversalRouter preferred; V3 fallback. Universe: data/assets.json.
 
 ## MCP
 

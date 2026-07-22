@@ -62,7 +62,9 @@ Used each autopilot pass for a short thesis + preferred buys.
 ```bash
 LLM_API_KEY=sk-...
 LLM_PROVIDER=openai          # or anthropic
-# LLM_MODEL=gpt-4o-mini     # optional override
+# LLM_MODEL=claude-sonnet-5    # Anthropic default if unset (recommended)
+# LLM_MODEL=claude-opus-4-8    # stronger / costlier optional upgrade
+# LLM_MODEL=gpt-4o-mini        # when provider=openai
 ```
 
 If `LLM_API_KEY` is empty, the shell uses the settings thesis / a default core line instead.
@@ -114,7 +116,7 @@ A `403` on post usually means wrong keys, missing write permission, or an access
 - Dry run ON by default (prepare + log only); turn **Dry run: OFF** in the dashboard to broadcast
 - Dashboard dry-run toggle writes `data/settings.json` and overrides process `DRY_RUN` for that shell session.
 - **Dry run does not block X** — with Post to X on, Once/Run still tweets (labeled dry-run). Use **Settings → Test X post** to tweet without trading.
-- Default policy **`core`**: ~70% WETH cash, small `deployPct` per pass
+- Default policy **`core`**: cash reserve (default 30% WETH); **allowlist = candidates**; opens only via thesis/`preferBuys` (see [`docs/TRADING.md`](docs/TRADING.md))
 - **Fee-aware gate**: swaps skip unless expected edge beats gas+slip (`minNotionalUsd` / `minEdgeBps`); Live shows cost/EV lines
 - Allowlist + `maxNotionalEth` + `maxActionsPerPass` cap how fast the agent can spend
 - Not financial advice. Stock tokens are geo-restricted (not for U.S. persons).

@@ -31,17 +31,17 @@ export type ShellSettings = {
 
 const DEFAULTS: ShellSettings = {
   policy: "core",
-  reserveWethPct: 70,
+  reserveWethPct: 30,
   deployPct: 15,
   intervalMs: 300_000,
   allowlist: ["NVDA", "AAPL", "AMZN", "TSLA", "META", "GOOGL", "MSFT", "PLTR"],
-  maxNotionalEth: 0.05,
-  maxActionsPerPass: 2,
+  maxNotionalEth: 0.01,
+  maxActionsPerPass: 3,
   postToX: true,
   thesis: "",
   dryRun: true,
-  minNotionalUsd: 25,
-  minEdgeBps: 40,
+  minNotionalUsd: 3,
+  minEdgeBps: 10,
   takeProfitPct: 3,
   stopLossPct: 2.5,
   addOnlyDipBps: 50,
@@ -89,21 +89,21 @@ export function loadSettings(): ShellSettings {
 function normalize(s: ShellSettings): ShellSettings {
   return {
     policy: s.policy || "core",
-    reserveWethPct: clamp(Number(s.reserveWethPct) || 70, 0, 100),
+    reserveWethPct: clamp(Number(s.reserveWethPct) || 30, 0, 100),
     deployPct: clamp(Number(s.deployPct) || 15, 1, 100),
     intervalMs: Math.max(30_000, Number(s.intervalMs) || 300_000),
     allowlist: Array.isArray(s.allowlist)
       ? s.allowlist.map((x) => String(x).toUpperCase()).filter(Boolean)
       : DEFAULTS.allowlist,
-    maxNotionalEth: Math.max(0, Number(s.maxNotionalEth) || 0.05),
-    maxActionsPerPass: clamp(Number(s.maxActionsPerPass) || 2, 1, 10),
+    maxNotionalEth: Math.max(0, Number(s.maxNotionalEth) || 0.01),
+    maxActionsPerPass: clamp(Number(s.maxActionsPerPass) || 3, 1, 10),
     postToX: Boolean(s.postToX),
     thesis: typeof s.thesis === "string" ? s.thesis : "",
     dryRun: s.dryRun === undefined ? true : Boolean(s.dryRun),
-    minNotionalUsd: Math.max(1, Number(s.minNotionalUsd) || 25),
-    minEdgeBps: clamp(Number(s.minEdgeBps) || 40, 0, 500),
-    takeProfitPct: Math.max(0, Number(s.takeProfitPct) || 3),
-    stopLossPct: Math.max(0, Number(s.stopLossPct) || 2.5),
+    minNotionalUsd: Math.max(1, Number(s.minNotionalUsd) || 3),
+    minEdgeBps: clamp(Number(s.minEdgeBps) || 10, 0, 500),
+    takeProfitPct: clamp(Math.max(0, Number(s.takeProfitPct) || 3), 0, 100),
+    stopLossPct: clamp(Math.max(0, Number(s.stopLossPct) || 2.5), 0, 100),
     addOnlyDipBps: clamp(Number(s.addOnlyDipBps) || 50, 0, 2000),
     estimateGasEth:
       s.estimateGasEth != null && Number(s.estimateGasEth) > 0

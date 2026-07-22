@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 import {
   HoldingsChart,
   type HistoryPoint,
@@ -204,6 +204,272 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 function shortAddr(addr: string) {
   if (addr.length < 12) return addr;
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+/** Turn http(s) URLs in plain text into new-tab links. */
+function linkify(text: string) {
+  const re = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(re);
+  return parts.map((part, i) => {
+    if (/^https?:\/\//.test(part)) {
+      const href = part.replace(/[.,;:!?)]+$/, "");
+      const trailing = part.slice(href.length);
+      return (
+        <span key={i}>
+          <a href={href} target="_blank" rel="noreferrer">
+            {href}
+          </a>
+          {trailing}
+        </span>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+/** Settings label with hover tooltip overlay. */
+function TipLabel({
+  tip,
+  children,
+}: {
+  tip: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="tip-label">
+      <span className="tip-label-text">{children}</span>
+      <span className="tip-bubble" role="tooltip">
+        {tip}
+      </span>
+    </label>
+  );
+}
+
+const SETTING_TIPS = {
+  policy:
+    "Trading policy for each pass. core = cash reserve + selective sleeve buys/sells (recommended). Others are manual/legacy modes.",
+  reserveWethPct:
+    "Target cash share (WETH+ETH) of the book. Below this → sells only to restore dry powder. Default 30. Max 100.",
+  deployPct:
+    "Max % of total book value that can be spent on new buys in a single pass. Caps how fast dry powder is deployed. Max 100.",
+  intervalMs:
+    "How often autopilot runs when Run is active (hours / minutes / seconds). Minimum 30 seconds. Once ignores this.",
+  maxNotionalEth:
+    "Hard cap on WETH/ETH amountIn for a single buy. Skips larger prepared tickets.",
+  maxActionsPerPass:
+    "Max swaps prepared/signed per pass (buys + sells). Keeps passes from spraying many small txs.",
+  minNotionalUsd:
+    "Minimum USD size for a scheduled swap. Smaller tickets are skipped (fee protection).",
+  minEdgeBps:
+    "Preferred buy edge in bps vs round-trip gas+slip. On small books, buys still pass if the ticket is ≥10× estimated entry fees (and under 8% fee drag).",
+  takeProfitPct:
+    "Trim a held name when unrealized P&L % is at or above this (bank gains into cash). Max 100.",
+  stopLossPct:
+    "Cut/trim a held name when unrealized P&L % is at or below −this (risk off). Max 100.",
+  addOnlyDipBps:
+    "Only add to an existing position if mark is at least this many bps below avg cost (don’t chase strength into fees).",
+  estimateGasEth:
+    "Optional gas ETH cost per TBA step for fee estimates. Leave blank to use the trailing average from the trade log.",
+  allowlist:
+    "Candidate universe for thesis picks — not a must-buy list. Autopilot opens 1–2 names from here via LLM/preferBuys.",
+  thesis:
+    "Operator notes for the LLM (can name tickers). Used as context; tickers mentioned here can seed preferBuys if LLM is off.",
+  postToX:
+    "When yes, post a templated tweet after dry-run or live fills. Dry run does not block X.",
+  dryRun:
+    "ON = prepare and log only, no chain broadcast. OFF = live TBA txs. Toggle also available on the Live tab.",
+} as const;
+
+/**
+ * Number input that allows clearing while typing; clamps/validates on blur.
+ */
+function SettingsNumber({
+  value,
+  onCommit,
+  min = 0,
+  max,
+  step,
+  placeholder,
+  optional,
+}: {
+  value: number | undefined;
+  onCommit: (n: number | undefined) => void;
+  min?: number;
+  max?: number;
+  step?: string | number;
+  placeholder?: string;
+  /** Empty on blur clears to undefined instead of min/default. */
+  optional?: boolean;
+}) {
+  const [text, setText] = useState(
+    value == null || !Number.isFinite(value) ? "" : String(value),
+  );
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (focused) return;
+    setText(value == null || !Number.isFinite(value) ? "" : String(value));
+  }, [value, focused]);
+
+  function commit(raw: string) {
+    const trimmed = raw.trim();
+    if (trimmed === "" || trimmed === "-" || trimmed === ".") {
+      if (optional) {
+        onCommit(undefined);
+        setText("");
+        return;
+      }
+      const fallback = min;
+      onCommit(fallback);
+      setText(String(fallback));
+      return;
+    }
+    let n = Number(trimmed);
+    if (!Number.isFinite(n)) {
+      setText(value == null ? "" : String(value));
+      return;
+    }
+    if (min != null) n = Math.max(min, n);
+    if (max != null) n = Math.min(max, n);
+    onCommit(n);
+    setText(String(n));
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      step={step}
+      placeholder={placeholder}
+      value={text}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => {
+        const v = e.target.value;
+        // Allow empty / partial numeric typing
+        if (v === "" || /^-?\d*\.?\d*$/.test(v)) setText(v);
+      }}
+      onBlur={() => {
+        setFocused(false);
+        commit(text);
+      }}
+    />
+  );
+}
+
+function msToHms(ms: number): { h: number; m: number; s: number } {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return { h, m, s };
+}
+
+function hmsToMs(h: number, m: number, s: number): number {
+  return Math.max(0, h) * 3_600_000 + Math.max(0, m) * 60_000 + Math.max(0, s) * 1000;
+}
+
+function formatIntervalLabel(ms: number): string {
+  const { h, m, s } = msToHms(ms);
+  const parts: string[] = [];
+  if (h) parts.push(`${h}h`);
+  if (m) parts.push(`${m}m`);
+  if (s || !parts.length) parts.push(`${s}s`);
+  return parts.join(" ");
+}
+
+function IntervalDurationField({
+  ms,
+  onCommit,
+}: {
+  ms: number;
+  onCommit: (ms: number) => void;
+}) {
+  const parts = msToHms(ms);
+  const [h, setH] = useState(String(parts.h));
+  const [m, setM] = useState(String(parts.m));
+  const [s, setS] = useState(String(parts.s));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (focused) return;
+    const next = msToHms(ms);
+    setH(String(next.h));
+    setM(String(next.m));
+    setS(String(next.s));
+  }, [ms, focused]);
+
+  function commitAll(nextH: string, nextM: string, nextS: string) {
+    const hh = Math.max(0, Math.floor(Number(nextH) || 0));
+    let mm = Math.max(0, Math.floor(Number(nextM) || 0));
+    let ss = Math.max(0, Math.floor(Number(nextS) || 0));
+    // Normalize overflow (e.g. 90s → 1m 30s)
+    if (ss >= 60) {
+      mm += Math.floor(ss / 60);
+      ss = ss % 60;
+    }
+    if (mm >= 60) {
+      const addH = Math.floor(mm / 60);
+      mm = mm % 60;
+      onCommit(Math.max(30_000, hmsToMs(hh + addH, mm, ss)));
+    } else {
+      onCommit(Math.max(30_000, hmsToMs(hh, mm, ss)));
+    }
+  }
+
+  function onPartBlur() {
+    setFocused(false);
+    commitAll(h, m, s);
+  }
+
+  function bindPart(
+    value: string,
+    set: (v: string) => void,
+  ) {
+    return {
+      value,
+      onFocus: () => setFocused(true),
+      onChange: (e: ChangeEvent<HTMLInputElement>) => {
+        const v = e.target.value;
+        if (v === "" || /^\d*$/.test(v)) set(v);
+      },
+      onBlur: onPartBlur,
+    };
+  }
+
+  return (
+    <div className="interval-hms">
+      <div className="interval-hms-row">
+        <label className="interval-part">
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label="Hours"
+            {...bindPart(h, setH)}
+          />
+          <span>hr</span>
+        </label>
+        <label className="interval-part">
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label="Minutes"
+            {...bindPart(m, setM)}
+          />
+          <span>min</span>
+        </label>
+        <label className="interval-part">
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label="Seconds"
+            {...bindPart(s, setS)}
+          />
+          <span>sec</span>
+        </label>
+      </div>
+      <div className="interval-hms-hint">{formatIntervalLabel(ms)}</div>
+    </div>
+  );
 }
 
 function fmtUsd(n: number | null | undefined, digits = 2) {
@@ -823,7 +1089,7 @@ export default function HomePage() {
                   >
                     <span>{new Date(ev.ts).toLocaleTimeString()}</span>
                     <span className="msg">
-                      [{ev.type}] {ev.message}
+                      [{ev.type}] {linkify(ev.message)}
                     </span>
                   </div>
                 ))}
@@ -1245,7 +1511,7 @@ export default function HomePage() {
               </p>
               <div className="form-grid">
                 <div className="field">
-                  <label>Policy</label>
+                  <TipLabel tip={SETTING_TIPS.policy}>Policy</TipLabel>
                   <select
                     value={settingsDraft.policy}
                     onChange={(e) =>
@@ -1271,160 +1537,183 @@ export default function HomePage() {
                   </select>
                 </div>
                 <div className="field">
-                  <label>Reserve WETH %</label>
-                  <input
-                    type="number"
+                  <TipLabel tip={SETTING_TIPS.reserveWethPct}>
+                    Reserve WETH %
+                  </TipLabel>
+                  <SettingsNumber
                     value={settingsDraft.reserveWethPct}
-                    onChange={(e) =>
+                    min={0}
+                    max={100}
+                    onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        reserveWethPct: Number(e.target.value),
+                        reserveWethPct: n ?? 30,
                       })
                     }
                   />
                 </div>
                 <div className="field">
-                  <label>Deploy %</label>
-                  <input
-                    type="number"
+                  <TipLabel tip={SETTING_TIPS.deployPct}>Deploy %</TipLabel>
+                  <SettingsNumber
                     value={settingsDraft.deployPct}
-                    onChange={(e) =>
+                    min={1}
+                    max={100}
+                    onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        deployPct: Number(e.target.value),
+                        deployPct: n ?? 15,
                       })
                     }
                   />
                 </div>
                 <div className="field">
-                  <label>Interval ms</label>
-                  <input
-                    type="number"
-                    value={settingsDraft.intervalMs}
-                    onChange={(e) =>
+                  <TipLabel tip={SETTING_TIPS.intervalMs}>
+                    Interval
+                  </TipLabel>
+                  <IntervalDurationField
+                    ms={settingsDraft.intervalMs}
+                    onCommit={(nextMs) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        intervalMs: Number(e.target.value),
+                        intervalMs: nextMs,
                       })
                     }
                   />
                 </div>
                 <div className="field">
-                  <label>Max notional ETH</label>
-                  <input
-                    type="number"
-                    step="0.001"
+                  <TipLabel tip={SETTING_TIPS.maxNotionalEth}>
+                    Max notional ETH
+                  </TipLabel>
+                  <SettingsNumber
                     value={settingsDraft.maxNotionalEth}
-                    onChange={(e) =>
+                    min={0}
+                    step="0.001"
+                    onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        maxNotionalEth: Number(e.target.value),
+                        maxNotionalEth: n ?? 0.01,
                       })
                     }
                   />
                 </div>
                 <div className="field">
-                  <label>Max actions / pass</label>
-                  <input
-                    type="number"
+                  <TipLabel tip={SETTING_TIPS.maxActionsPerPass}>
+                    Max actions / pass
+                  </TipLabel>
+                  <SettingsNumber
                     value={settingsDraft.maxActionsPerPass}
-                    onChange={(e) =>
+                    min={1}
+                    max={10}
+                    onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        maxActionsPerPass: Number(e.target.value),
+                        maxActionsPerPass: n ?? 3,
                       })
                     }
                   />
                 </div>
                 <div className="field">
-                  <label>Min notional USD</label>
-                  <input
-                    type="number"
-                    step="1"
-                    value={settingsDraft.minNotionalUsd ?? 25}
-                    onChange={(e) =>
+                  <TipLabel tip={SETTING_TIPS.minNotionalUsd}>
+                    Min notional USD
+                  </TipLabel>
+                  <SettingsNumber
+                    value={settingsDraft.minNotionalUsd ?? 3}
+                    min={1}
+                    step={1}
+                    onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        minNotionalUsd: Number(e.target.value),
+                        minNotionalUsd: n ?? 3,
                       })
                     }
                   />
                 </div>
                 <div className="field">
-                  <label>Min edge bps</label>
-                  <input
-                    type="number"
-                    step="1"
-                    value={settingsDraft.minEdgeBps ?? 40}
-                    onChange={(e) =>
+                  <TipLabel tip={SETTING_TIPS.minEdgeBps}>Min edge bps</TipLabel>
+                  <SettingsNumber
+                    value={settingsDraft.minEdgeBps ?? 10}
+                    min={0}
+                    max={500}
+                    step={1}
+                    onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        minEdgeBps: Number(e.target.value),
+                        minEdgeBps: n ?? 10,
                       })
                     }
                   />
                 </div>
                 <div className="field">
-                  <label>Take profit %</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <TipLabel tip={SETTING_TIPS.takeProfitPct}>
+                    Take profit %
+                  </TipLabel>
+                  <SettingsNumber
                     value={settingsDraft.takeProfitPct ?? 3}
-                    onChange={(e) =>
-                      setSettingsDraft({
-                        ...settingsDraft,
-                        takeProfitPct: Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label>Stop loss %</label>
-                  <input
-                    type="number"
+                    min={0}
+                    max={100}
                     step="0.1"
+                    onCommit={(n) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        takeProfitPct: n ?? 3,
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.stopLossPct}>Stop loss %</TipLabel>
+                  <SettingsNumber
                     value={settingsDraft.stopLossPct ?? 2.5}
-                    onChange={(e) =>
+                    min={0}
+                    max={100}
+                    step="0.1"
+                    onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        stopLossPct: Number(e.target.value),
+                        stopLossPct: n ?? 2.5,
                       })
                     }
                   />
                 </div>
                 <div className="field">
-                  <label>Add-only dip bps</label>
-                  <input
-                    type="number"
-                    step="1"
+                  <TipLabel tip={SETTING_TIPS.addOnlyDipBps}>
+                    Add-only dip bps
+                  </TipLabel>
+                  <SettingsNumber
                     value={settingsDraft.addOnlyDipBps ?? 50}
-                    onChange={(e) =>
+                    min={0}
+                    max={2000}
+                    step={1}
+                    onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        addOnlyDipBps: Number(e.target.value),
+                        addOnlyDipBps: n ?? 50,
                       })
                     }
                   />
                 </div>
                 <div className="field">
-                  <label>Est. gas ETH / step</label>
-                  <input
-                    type="number"
+                  <TipLabel tip={SETTING_TIPS.estimateGasEth}>
+                    Est. gas ETH / step
+                  </TipLabel>
+                  <SettingsNumber
+                    value={settingsDraft.estimateGasEth}
+                    min={0}
                     step="0.000001"
                     placeholder="auto from trade-log"
-                    value={settingsDraft.estimateGasEth ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
+                    optional
+                    onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        estimateGasEth:
-                          v === "" ? undefined : Number(v),
-                      });
-                    }}
+                        estimateGasEth: n != null && n > 0 ? n : undefined,
+                      })
+                    }
                   />
                 </div>
                 <div className="field full">
-                  <label>Allowlist ({settingsDraft.allowlist.length} symbols)</label>
+                  <TipLabel tip={SETTING_TIPS.allowlist}>
+                    Allowlist ({settingsDraft.allowlist.length} symbols)
+                  </TipLabel>
                   <div className="allow-row">
                     <input
                       readOnly
@@ -1441,7 +1730,7 @@ export default function HomePage() {
                   </div>
                 </div>
                 <div className="field full">
-                  <label>Thesis notes</label>
+                  <TipLabel tip={SETTING_TIPS.thesis}>Thesis notes</TipLabel>
                   <textarea
                     rows={3}
                     value={settingsDraft.thesis}
@@ -1454,7 +1743,7 @@ export default function HomePage() {
                   />
                 </div>
                 <div className="field">
-                  <label>Post to X</label>
+                  <TipLabel tip={SETTING_TIPS.postToX}>Post to X</TipLabel>
                   <select
                     value={settingsDraft.postToX ? "yes" : "no"}
                     onChange={(e) =>
@@ -1469,7 +1758,7 @@ export default function HomePage() {
                   </select>
                 </div>
                 <div className="field">
-                  <label>Dry run</label>
+                  <TipLabel tip={SETTING_TIPS.dryRun}>Dry run</TipLabel>
                   <select
                     value={settingsDraft.dryRun ? "yes" : "no"}
                     onChange={(e) =>

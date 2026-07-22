@@ -79,7 +79,7 @@ export async function cmdManage(opts: {
   );
   console.log(`\nContents ≈ $${analysis.contentsUsd} (ETH/USD ${analysis.ethUsd ?? "?"})`);
   console.log(
-    `Cash (WETH+ETH) ≈ $${analysis.cashUsd ?? 0} (${analysis.cashPct ?? 0}%) — target ${analysis.targetCashPct ?? 70}%`,
+    `Cash (WETH+ETH) ≈ $${analysis.cashUsd ?? 0} (${analysis.cashPct ?? 0}%) — target ${analysis.targetCashPct ?? 30}%`,
   );
   console.log(`Buy universe: ${analysis.buyUniverse.join(", ") || "(none)"}`);
   console.log("Holdings:");
