@@ -47,7 +47,24 @@ function loadRaw(): HistoryFile {
 }
 
 function saveRaw(file: HistoryFile) {
-  writeFileSync(historyPath(), JSON.stringify(file, null, 2) + "\n");
+  const path = historyPath();
+  // Keep a bak when the series shrinks so a bad write can't erase the night.
+  if (existsSync(path)) {
+    try {
+      const prev = JSON.parse(readFileSync(path, "utf8")) as HistoryFile;
+      const prevN = prev.points?.length ?? 0;
+      const nextN = file.points.length;
+      if (prevN >= 10 && nextN < prevN) {
+        writeFileSync(
+          path + ".bak",
+          JSON.stringify(prev, null, 2) + "\n",
+        );
+      }
+    } catch {
+      // ignore bak failures
+    }
+  }
+  writeFileSync(path, JSON.stringify(file, null, 2) + "\n");
 }
 
 export function getHistory(tokenId?: string): HistoryFile {
@@ -86,13 +103,13 @@ export function recordSnapshot(args: {
     file.tokenId = args.tokenId;
   }
 
-  const last = file.points.at(-1);
   const now = Date.now();
+  const prev = file.points.at(-1);
   if (
     !args.force &&
-    last &&
-    now - last.ts < MIN_INTERVAL_MS &&
-    nearEqual(last.holdings, holdings)
+    prev &&
+    now - prev.ts < MIN_INTERVAL_MS &&
+    nearEqual(prev.holdings, holdings)
   ) {
     return null;
   }
@@ -116,11 +133,13 @@ function nearEqual(a: Record<string, number>, b: Record<string, number>) {
   return true;
 }
 
-/** Series keys ordered by latest USD weight (largest first). */
+/** Series keys = union across all points, ordered by latest USD weight. */
 export function seriesKeys(points: HistoryPoint[]): string[] {
   const last = points.at(-1);
   if (!last) return [];
-  return Object.entries(last.holdings)
-    .sort((a, b) => b[1] - a[1])
-    .map(([k]) => k);
+  const keys = new Set<string>();
+  for (const p of points) {
+    for (const k of Object.keys(p.holdings)) keys.add(k);
+  }
+  return [...keys].sort((a, b) => (last.holdings[b] ?? 0) - (last.holdings[a] ?? 0));
 }

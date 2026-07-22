@@ -6,6 +6,7 @@ dist/
 .env
 data/settings.json
 data/portfolio-history.json
+data/portfolio-history.json.bak
 data/cost-basis.json
 data/trade-log.json
 .stonk-trader/
