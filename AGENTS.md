@@ -35,7 +35,7 @@ Default policy: **`core`** (`reserveWethPct=30`, `deployPct≤15` per pass).
 
 **Allowlist = candidates**, not a must-buy list. Empty `preferBuys` → hold is correct.
 
-Fee defaults: `minNotionalUsd=3`, `minEdgeBps=10`, `takeProfitPct=3`, `stopLossPct=2.5`, `addOnlyDipBps=50`, `maxActionsPerPass=3`, `maxNotionalEth=0.01`.
+Fee defaults: `minNotionalUsd=3`, `minEdgeBps=10`, `takeProfitPct=3`, `stopLossPct=2.5`, `addOnlyDipBps=50`, `maxActionsPerPass=3`, `maxNotionalEth=0.05`.
 
 ## Policies
 

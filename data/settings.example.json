@@ -4,7 +4,7 @@
   "deployPct": 15,
   "intervalMs": 300000,
   "allowlist": ["NVDA", "AAPL", "AMZN", "TSLA", "META", "GOOGL", "MSFT", "PLTR"],
-  "maxNotionalEth": 0.01,
+  "maxNotionalEth": 0.05,
   "maxActionsPerPass": 3,
   "postToX": true,
   "thesis": "",

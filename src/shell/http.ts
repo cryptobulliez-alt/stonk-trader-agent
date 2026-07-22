@@ -15,8 +15,10 @@ import { connectBroker } from "../tba.js";
 import {
   getAutopilotSchedule,
   pauseAutopilot,
+  resumeAutopilot,
   runOnce,
   startAutopilot,
+  stopAutopilot,
 } from "./autopilot.js";
 import {
   getRecentEvents,
@@ -425,9 +427,21 @@ async function handle(
       return;
     }
 
+    if (method === "POST" && path === "/api/agent/resume") {
+      resumeAutopilot();
+      json(res, 200, { ok: true, running: true });
+      return;
+    }
+
     if (method === "POST" && path === "/api/agent/pause") {
       pauseAutopilot();
-      json(res, 200, { ok: true, running: false });
+      json(res, 200, { ok: true, running: false, paused: true });
+      return;
+    }
+
+    if (method === "POST" && path === "/api/agent/stop") {
+      stopAutopilot();
+      json(res, 200, { ok: true, running: false, stopped: true });
       return;
     }
 

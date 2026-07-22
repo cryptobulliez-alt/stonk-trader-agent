@@ -39,14 +39,31 @@ export function startAutopilot() {
   void scheduleNext(0);
 }
 
+export function resumeAutopilot() {
+  setRunning(true, "Autopilot resumed");
+  setAgentState("analyzing", "Autopilot resumed — next pass beginning");
+  void scheduleNext(0);
+}
+
 export function pauseAutopilot() {
-  setRunning(false);
+  setRunning(false, "Autopilot paused");
   if (timer) {
     clearTimeout(timer);
     timer = null;
   }
   nextPassAt = null;
   setAgentState("paused", "Autopilot paused");
+}
+
+/** Fully deactivate autopilot (not the same as pause — no Resume). */
+export function stopAutopilot() {
+  setRunning(false, "Autopilot stopped");
+  if (timer) {
+    clearTimeout(timer);
+    timer = null;
+  }
+  nextPassAt = null;
+  setAgentState("idle", "Autopilot stopped");
 }
 
 export function getAutopilotSchedule() {

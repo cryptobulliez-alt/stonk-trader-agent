@@ -876,6 +876,11 @@ export default function HomePage() {
         : "—";
   const nextCheckLabel = passInFlight ? "Pass in progress" : "Next check";
 
+  const autopilotRunning = Boolean(status?.agent.running);
+  const autopilotPaused =
+    !autopilotRunning && status?.agent.state === "paused";
+  const autopilotActive = autopilotRunning || autopilotPaused;
+
   const tba = broker?.tba ?? portfolio?.broker.tba ?? null;
   const owner = broker?.owner ?? portfolio?.broker.owner ?? null;
   const brokerName = broker?.name ?? portfolio?.broker.name ?? null;
@@ -986,11 +991,13 @@ export default function HomePage() {
     <div className="app">
       <div className="main">
         <div className="ticker">
-          <span className={`dot ${status?.agent.running ? "" : "off"}`} />
+          <span className={`dot ${autopilotActive ? "" : "off"}`} />
           <span className="ticker-left">
-            {status?.agent.running
-              ? `RUNNING · ${status.agent.state.toUpperCase()}`
-              : "IDLE"}{" "}
+            {autopilotRunning
+              ? `RUNNING · ${status?.agent.state.toUpperCase()}`
+              : autopilotPaused
+                ? "PAUSED"
+                : "IDLE"}{" "}
             · BROKER #{status?.env.tokenId ?? "?"}
             {tba ? ` · TBA ${shortAddr(tba)}` : ""} ·{" "}
             {status?.settings.dryRun !== false ? "DRY_RUN" : "LIVE"}
@@ -1191,17 +1198,35 @@ export default function HomePage() {
           <div className="btn-row">
             <button
               className="btn primary"
-              disabled={!!busy || status?.agent.running}
+              disabled={!!busy || autopilotActive}
               onClick={() => void postAgent("/api/agent/start")}
             >
               Run
             </button>
+            {autopilotPaused ? (
+              <button
+                className="btn primary"
+                disabled={!!busy}
+                onClick={() => void postAgent("/api/agent/resume")}
+              >
+                Resume
+              </button>
+            ) : (
+              <button
+                className="btn"
+                disabled={!!busy || !autopilotRunning}
+                onClick={() => void postAgent("/api/agent/pause")}
+              >
+                Pause
+              </button>
+            )}
             <button
               className="btn"
-              disabled={!!busy || !status?.agent.running}
-              onClick={() => void postAgent("/api/agent/pause")}
+              disabled={!!busy || !autopilotActive}
+              onClick={() => void postAgent("/api/agent/stop")}
+              title="Deactivate autopilot"
             >
-              Pause
+              Stop
             </button>
             <button
               className="btn"
@@ -1845,7 +1870,7 @@ export default function HomePage() {
                     onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        maxNotionalEth: n ?? 0.01,
+                        maxNotionalEth: n ?? 0.05,
                       })
                     }
                   />

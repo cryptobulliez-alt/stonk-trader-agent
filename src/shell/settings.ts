@@ -35,7 +35,7 @@ const DEFAULTS: ShellSettings = {
   deployPct: 15,
   intervalMs: 300_000,
   allowlist: ["NVDA", "AAPL", "AMZN", "TSLA", "META", "GOOGL", "MSFT", "PLTR"],
-  maxNotionalEth: 0.01,
+  maxNotionalEth: 0.05,
   maxActionsPerPass: 3,
   postToX: true,
   thesis: "",
@@ -95,7 +95,7 @@ function normalize(s: ShellSettings): ShellSettings {
     allowlist: Array.isArray(s.allowlist)
       ? s.allowlist.map((x) => String(x).toUpperCase()).filter(Boolean)
       : DEFAULTS.allowlist,
-    maxNotionalEth: Math.max(0, Number(s.maxNotionalEth) || 0.01),
+    maxNotionalEth: Math.max(0, Number(s.maxNotionalEth) || 0.05),
     maxActionsPerPass: clamp(Number(s.maxActionsPerPass) || 3, 1, 10),
     postToX: Boolean(s.postToX),
     thesis: typeof s.thesis === "string" ? s.thesis : "",

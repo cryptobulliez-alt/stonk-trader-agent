@@ -38,11 +38,15 @@ export function isRunning(): boolean {
   return running;
 }
 
-export function setRunning(value: boolean) {
+export function setRunning(value: boolean, message?: string) {
   running = value;
-  emitEvent("agent.running", value ? "Autopilot running" : "Autopilot paused", {
-    running: value,
-  });
+  emitEvent(
+    "agent.running",
+    message ?? (value ? "Autopilot running" : "Autopilot paused"),
+    {
+      running: value,
+    },
+  );
 }
 
 export function setAgentState(state: AgentState, message?: string) {
