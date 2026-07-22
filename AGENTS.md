@@ -24,10 +24,10 @@ Default entry: `npm run shell` → dashboard at `http://localhost:3000` + API at
 Default policy: **`core`** (`reserveWethPct=30`, `deployPct≤15` per pass).
 
 1. Snapshot book + cost basis  
-2. **Signals** — optional X cashtag buzz (`useXSignals`); **Thesis** — LLM loads `skills/*/SKILL.md` agent rules + returns `preferBuys` / `preferSells` / `stance`; else tickers named in Settings thesis notes  
+2. **Signals** — optional X + LLM only when `researchRails` says the pass is ambiguous (default **auto** skips them for TP/SL / cash-restore / near-target hold); mechanical thesis from marks otherwise  
 3. Core actions  
    - Cash below reserve → **sells only**  
-   - Held names → **take-profit / stop-loss** (deeper SL → larger trim) (+ thesis sells)  
+   - Held names → **take-profit / stop-loss vs WETH** (deeper SL → larger trim) (+ thesis sells)  
    - Opens → **only** `preferBuys` (≤2), sized by deploy + **risk budget** (`maxRiskPctPerTrade`)  
 4. **Fee EV gate** — buys need edge/size vs fees; **risk exits (TP/SL/concentration) clear when notional ≥ min** (losers are allowed); thesis trims still need uPnL ≥ sell cost  
 5. Prepare (v4; TBA-funded buys) → sign if Dry run OFF → optional X fill post  

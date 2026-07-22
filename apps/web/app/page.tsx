@@ -112,6 +112,7 @@ type Settings = {
   maxActionsPerPass: number;
   postToX: boolean;
   useXSignals: boolean;
+  researchRails: "auto" | "always" | "off";
   thesis: string;
   dryRun: boolean;
   minNotionalUsd: number;
@@ -163,11 +164,18 @@ type Portfolio = {
       weightPct: number | null;
       priceUsd?: number | null;
       avgCostUsd?: number | null;
+      avgCostWeth?: number | null;
       markUsd?: number | null;
+      markWeth?: number | null;
       unrealizedPnlUsd?: number | null;
+      unrealizedPnlUsdPct?: number | null;
+      unrealizedPnlWeth?: number | null;
+      unrealizedPnlWethPct?: number | null;
       unrealizedPnlPct?: number | null;
       costBasisUsd?: number | null;
+      costBasisWeth?: number | null;
       realizedPnlUsd?: number;
+      realizedPnlWeth?: number;
       lastBuyPrice?: number | null;
       lastSellPrice?: number | null;
       seeded?: boolean;
@@ -200,7 +208,10 @@ type Portfolio = {
         qty: number;
         costUsd: number;
         avgCostUsd: number;
+        costWeth?: number;
+        avgCostWeth?: number;
         realizedPnlUsd: number;
+        realizedPnlWeth?: number;
         seeded: boolean;
       }
     >;
@@ -284,13 +295,13 @@ const SETTING_TIPS = {
   minEdgeBps:
     "Preferred buy edge in bps vs round-trip gas+slip. On small books, buys still pass if the ticket is ≥10× estimated entry fees (and under 8% fee drag).",
   takeProfitPct:
-    "Trim a held name when unrealized P&L % is at or above this (bank gains into cash). Max 100.",
+    "Trim when WETH-relative unrealized P&L % ≥ this (stock beat idle WETH). Banks gains into cash. Max 100.",
   stopLossPct:
-    "Cut/trim a held name when unrealized P&L % is at or below −this. Risk exit — clears the fee gate at min notional even when dollar uPnL is negative.",
+    "Cut/trim when WETH-relative unrealized P&L % ≤ −this (stock underperformed idle WETH). Risk exit — clears fee gate at min notional even when dollar uPnL is negative.",
   maxRiskPctPerTrade:
     "Max % of book at risk if stopLossPct hits on a new open. Caps buy size: book × this / stopLossPct (position-sizing skill).",
   addOnlyDipBps:
-    "Only add to an existing position if mark is at least this many bps below avg cost (don’t chase strength into fees).",
+    "Only add to an existing position if mark is at least this many bps below avg cost in WETH (don’t chase strength into fees).",
   estimateGasEth:
     "Optional gas ETH cost per TBA step for fee estimates. Leave blank to use the trailing average from the trade log.",
   allowlist:
@@ -300,7 +311,9 @@ const SETTING_TIPS = {
   postToX:
     "When yes, post a templated tweet after dry-run or live fills. Dry run does not block X.",
   useXSignals:
-    "When yes and X_BEARER_TOKEN is set, each pass fetches recent cashtag buzz for the allowlist/holdings and soft-biases preferBuys/preferSells (also fed to the LLM).",
+    "When yes and X_BEARER_TOKEN is set, fetch cashtag buzz only when Research rails says the pass needs research (not every pass in auto mode).",
+  researchRails:
+    "auto = skip LLM/X when TP/SL, cash-restore, or near-target hold are obvious from marks; always = every pass; off = never call LLM/X.",
   dryRun:
     "ON = prepare and log only, no chain broadcast. OFF = live TBA txs. Toggle also available on the Live tab.",
   llmModel:
@@ -515,35 +528,70 @@ function fmtPnl(n: number | null | undefined, pct: number | null | undefined) {
   };
 }
 
+function fmtWethPnl(
+  weth: number | null | undefined,
+  pct: number | null | undefined,
+) {
+  if (weth == null || !Number.isFinite(weth)) {
+    return { text: "—", cls: "pnl-flat" };
+  }
+  const sign = weth > 0 ? "+" : "";
+  const pctPart =
+    pct != null && Number.isFinite(pct) ? ` (${sign}${pct.toFixed(1)}%)` : "";
+  const abs = Math.abs(weth);
+  const digits = abs >= 0.01 ? 4 : 6;
+  return {
+    text: `${sign}${weth.toFixed(digits)} ETH${pctPart}`,
+    cls: weth > 1e-8 ? "pnl-up" : weth < -1e-8 ? "pnl-down" : "pnl-flat",
+  };
+}
+
 const CASH_SYMS = new Set(["WETH", "ETH", "USDG", "STONKBROKER"]);
 
 function portfolioPnlSummary(
   portfolio: Portfolio,
   points: HistoryPoint[],
 ) {
-  let unrealized = 0;
-  let costBasis = 0;
+  let unrealizedWeth = 0;
+  let costBasisWeth = 0;
+  let unrealizedUsd = 0;
+  let costBasisUsd = 0;
   let hasPnl = false;
   for (const h of portfolio.analysis.holdings) {
     if (CASH_SYMS.has(h.symbol)) continue;
+    if (h.unrealizedPnlWeth != null && Number.isFinite(h.unrealizedPnlWeth)) {
+      unrealizedWeth += h.unrealizedPnlWeth;
+      hasPnl = true;
+    }
+    if (h.costBasisWeth != null && Number.isFinite(h.costBasisWeth)) {
+      costBasisWeth += h.costBasisWeth;
+    } else if (h.avgCostWeth != null && h.amount > 0) {
+      costBasisWeth += h.avgCostWeth * h.amount;
+    }
     if (h.unrealizedPnlUsd != null && Number.isFinite(h.unrealizedPnlUsd)) {
-      unrealized += h.unrealizedPnlUsd;
+      unrealizedUsd += h.unrealizedPnlUsd;
       hasPnl = true;
     }
     if (h.costBasisUsd != null && Number.isFinite(h.costBasisUsd)) {
-      costBasis += h.costBasisUsd;
+      costBasisUsd += h.costBasisUsd;
     } else if (h.avgCostUsd != null && h.amount > 0) {
-      costBasis += h.avgCostUsd * h.amount;
+      costBasisUsd += h.avgCostUsd * h.amount;
     }
   }
-  let realized = 0;
+  let realizedWeth = 0;
+  let realizedUsd = 0;
   if (portfolio.ledger?.positions) {
     for (const p of Object.values(portfolio.ledger.positions)) {
-      realized += p.realizedPnlUsd || 0;
+      realizedUsd += p.realizedPnlUsd || 0;
+      realizedWeth += (p as { realizedPnlWeth?: number }).realizedPnlWeth || 0;
     }
   }
   const unrealizedPct =
-    costBasis > 0 ? (unrealized / costBasis) * 100 : null;
+    costBasisWeth > 0
+      ? (unrealizedWeth / costBasisWeth) * 100
+      : costBasisUsd > 0
+        ? (unrealizedUsd / costBasisUsd) * 100
+        : null;
 
   // Overall / period P&L = book change across the chart (first → latest snapshot)
   const first = points[0];
@@ -564,10 +612,20 @@ function portfolioPnlSummary(
 
   return {
     book: portfolio.analysis.contentsUsd,
-    costBasis: costBasis > 0 ? costBasis : null,
-    unrealized: hasPnl ? unrealized : null,
+    costBasis: costBasisWeth > 0 ? costBasisWeth : costBasisUsd > 0 ? costBasisUsd : null,
+    costBasisWeth: costBasisWeth > 0 ? costBasisWeth : null,
+    costBasisUsd: costBasisUsd > 0 ? costBasisUsd : null,
+    unrealized: hasPnl
+      ? costBasisWeth > 0
+        ? unrealizedWeth
+        : unrealizedUsd
+      : null,
+    unrealizedWeth: hasPnl ? unrealizedWeth : null,
+    unrealizedUsd: hasPnl ? unrealizedUsd : null,
     unrealizedPct,
-    realized,
+    realized: realizedWeth || realizedUsd,
+    realizedWeth,
+    realizedUsd,
     periodPnl,
     periodPct,
     periodFrom,
@@ -582,8 +640,23 @@ function pnlClass(n: number | null | undefined) {
   return "pnl-flat";
 }
 
+function pnlClassWeth(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(n)) return "pnl-flat";
+  if (n > 1e-8) return "pnl-up";
+  if (n < -1e-8) return "pnl-down";
+  return "pnl-flat";
+}
+
 function moneySigned(n: number) {
   return n >= 0 ? `+$${n.toFixed(2)}` : `-$${Math.abs(n).toFixed(2)}`;
+}
+
+function wethSigned(n: number) {
+  const abs = Math.abs(n);
+  const digits = abs >= 0.01 ? 4 : 6;
+  return n >= 0
+    ? `+${n.toFixed(digits)} ETH`
+    : `-${abs.toFixed(digits)} ETH`;
 }
 
 function pctSigned(n: number) {
@@ -1475,14 +1548,14 @@ export default function HomePage() {
                   {(() => {
                     const pnl = portfolioPnlSummary(portfolio, history.points);
                     const pCls = pnlClass(pnl.periodPnl);
-                    const uCls = pnlClass(pnl.unrealized);
+                    const uCls = pnlClassWeth(pnl.unrealizedWeth ?? pnl.unrealized);
                     return (
                       <div className="stats pnl-stats" style={{ marginBottom: 18 }}>
                         <div className="stat">
                           <div className="value">
                             {pnl.book != null ? `$${pnl.book.toFixed(2)}` : "—"}
                           </div>
-                          <div className="label">Book</div>
+                          <div className="label">Book (USD)</div>
                         </div>
                         <div className="stat">
                           <div className={`value ${pCls}`}>
@@ -1491,7 +1564,7 @@ export default function HomePage() {
                               : moneySigned(pnl.periodPnl)}
                           </div>
                           <div className="label">
-                            Period P&amp;L
+                            Period P&amp;L (USD)
                             {pnl.periodFrom != null && pnl.periodTo != null
                               ? ` · $${pnl.periodFrom.toFixed(2)}→$${pnl.periodTo.toFixed(2)}`
                               : ""}
@@ -1507,12 +1580,14 @@ export default function HomePage() {
                         </div>
                         <div className="stat">
                           <div className={`value ${uCls}`}>
-                            {pnl.unrealized == null
-                              ? "—"
-                              : moneySigned(pnl.unrealized)}
+                            {pnl.unrealizedWeth != null
+                              ? wethSigned(pnl.unrealizedWeth)
+                              : pnl.unrealizedUsd != null
+                                ? moneySigned(pnl.unrealizedUsd)
+                                : "—"}
                           </div>
                           <div className="label">
-                            Open (vs cost)
+                            Sleeve vs WETH
                             {pnl.unrealizedPct != null
                               ? ` · ${pctSigned(pnl.unrealizedPct)}`
                               : ""}
@@ -1528,15 +1603,20 @@ export default function HomePage() {
                     series={history.series}
                   />
 
-                  <table className="holdings" style={{ marginTop: 18 }}>
+                  <p className="sub" style={{ marginTop: 14, marginBottom: 0 }}>
+                    Trading P&amp;L is <strong>vs idle WETH</strong> (stock/ETH).
+                    USD columns are for reporting — ETH/USD moves do not drive stops.
+                  </p>
+
+                  <table className="holdings" style={{ marginTop: 12 }}>
                     <thead>
                       <tr>
                         <th>Symbol</th>
                         <th>Amount</th>
                         <th>Mark</th>
-                        <th>Avg cost</th>
+                        <th>Avg (WETH)</th>
                         <th>USD</th>
-                        <th>P&amp;L</th>
+                        <th>P&amp;L (WETH)</th>
                         <th>Weight</th>
                       </tr>
                     </thead>
@@ -1547,7 +1627,10 @@ export default function HomePage() {
                         );
                         const pnl = isCash
                           ? { text: "—", cls: "pnl-flat" }
-                          : fmtPnl(h.unrealizedPnlUsd, h.unrealizedPnlPct);
+                          : fmtWethPnl(
+                              h.unrealizedPnlWeth,
+                              h.unrealizedPnlWethPct ?? h.unrealizedPnlPct,
+                            );
                         const mark = h.markUsd ?? h.priceUsd;
                         return (
                           <tr key={h.symbol}>
@@ -1560,16 +1643,41 @@ export default function HomePage() {
                               ) : null}
                             </td>
                             <td>{h.amount.toFixed(6)}</td>
-                            <td>{isCash ? "—" : fmtUsd(mark, 4)}</td>
                             <td>
                               {isCash
                                 ? "—"
-                                : h.avgCostUsd != null
-                                  ? fmtUsd(h.avgCostUsd, 4)
-                                  : "—"}
+                                : h.markWeth != null
+                                  ? `${h.markWeth.toFixed(8)} ETH`
+                                  : fmtUsd(mark, 4)}
+                            </td>
+                            <td>
+                              {isCash
+                                ? "—"
+                                : h.avgCostWeth != null
+                                  ? `${h.avgCostWeth.toFixed(8)} ETH`
+                                  : h.avgCostUsd != null
+                                    ? fmtUsd(h.avgCostUsd, 4)
+                                    : "—"}
                             </td>
                             <td>{fmtUsd(h.usd)}</td>
-                            <td className={pnl.cls}>{pnl.text}</td>
+                            <td className={pnl.cls}>
+                              {pnl.text}
+                              {!isCash &&
+                              h.unrealizedPnlUsd != null &&
+                              h.unrealizedPnlUsdPct != null ? (
+                                <span
+                                  className="sub"
+                                  style={{ display: "block", fontSize: 11 }}
+                                  title="USD P&L (reporting)"
+                                >
+                                  {fmtPnl(
+                                    h.unrealizedPnlUsd,
+                                    h.unrealizedPnlUsdPct,
+                                  ).text}{" "}
+                                  USD
+                                </span>
+                              ) : null}
+                            </td>
                             <td>{(h.weightPct ?? 0).toFixed(1)}%</td>
                           </tr>
                         );
@@ -2275,6 +2383,27 @@ export default function HomePage() {
                   >
                     <option value="yes">yes</option>
                     <option value="no">no</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.researchRails}>
+                    Research rails
+                  </TipLabel>
+                  <select
+                    value={settingsDraft.researchRails ?? "auto"}
+                    onChange={(e) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        researchRails: e.target.value as
+                          | "auto"
+                          | "always"
+                          | "off",
+                      })
+                    }
+                  >
+                    <option value="auto">auto (thrifty)</option>
+                    <option value="always">always</option>
+                    <option value="off">off</option>
                   </select>
                 </div>
                 <div className="field">

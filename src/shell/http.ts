@@ -397,7 +397,7 @@ async function handle(
         },
       );
       // Seed / reconcile cost basis from marks, then attach P&L fields
-      const holdings = enrichHoldings(tokenId, analysis.holdings);
+      const holdings = enrichHoldings(tokenId, analysis.holdings, analysis.ethUsd);
       const ledger = getLedger(tokenId);
 
       recordSnapshot({

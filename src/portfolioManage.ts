@@ -253,10 +253,12 @@ export type ManageOpts = {
   preferBuys?: string[];
   /** Discretionary trims this pass (trend break) — subset of held names. */
   preferSells?: string[];
-  /** Unrealized P&L % by symbol — prefer trimming winners when raising cash. */
-  unrealizedPnlPct?: Record<string, number>;
-  /** Avg cost USD by symbol (for dip-only adds). */
+  /** Avg cost USD by symbol (reporting). */
   avgCostUsd?: Record<string, number>;
+  /** Avg cost WETH by symbol — dip-adds prefer this when set. */
+  avgCostWeth?: Record<string, number>;
+  /** Unrealized P&L % by symbol — WETH-relative for core TP/SL. */
+  unrealizedPnlPct?: Record<string, number>;
   /** Skip scheduling swaps below this USD (default MIN_NOTIONAL_USD). */
   minNotionalUsd?: number;
   takeProfitPct?: number;
@@ -375,6 +377,7 @@ export async function analyzeBrokerPortfolio(
     thesis: opts.thesis,
     unrealizedPnlPct: opts.unrealizedPnlPct,
     avgCostUsd: opts.avgCostUsd,
+    avgCostWeth: opts.avgCostWeth,
     minNotionalUsd: opts.minNotionalUsd,
     takeProfitPct: opts.takeProfitPct,
     stopLossPct: opts.stopLossPct,
@@ -490,6 +493,7 @@ function buildActions(
     thesis?: string;
     unrealizedPnlPct?: Record<string, number>;
     avgCostUsd?: Record<string, number>;
+    avgCostWeth?: Record<string, number>;
     minNotionalUsd?: number;
     takeProfitPct?: number;
     stopLossPct?: number;
@@ -540,6 +544,7 @@ function buildActions(
         wethBudget,
         unrealizedPnlPct: opts.unrealizedPnlPct,
         avgCostUsd: opts.avgCostUsd,
+        avgCostWeth: opts.avgCostWeth,
         priceUsd: Object.fromEntries(
           holdings
             .filter((h) => h.priceUsd != null)
@@ -795,6 +800,7 @@ function buildCoreActions(
     wethBudget: number;
     unrealizedPnlPct?: Record<string, number>;
     avgCostUsd?: Record<string, number>;
+    avgCostWeth?: Record<string, number>;
     priceUsd?: Record<string, number>;
     minNotionalUsd: number;
     takeProfitPct: number;
@@ -811,8 +817,14 @@ function buildCoreActions(
   const targetCashUsd = opts.contentsUsd * (opts.reserveWethPct / 100);
   let wethBudget = opts.wethBudget;
   const pnlOf = (sym: string) => opts.unrealizedPnlPct?.[sym.toUpperCase()] ?? 0;
-  const avgOf = (sym: string) => opts.avgCostUsd?.[sym.toUpperCase()];
-  const markOf = (sym: string) => opts.priceUsd?.[sym.toUpperCase()];
+  const avgUsdOf = (sym: string) => opts.avgCostUsd?.[sym.toUpperCase()];
+  const avgWethOf = (sym: string) => opts.avgCostWeth?.[sym.toUpperCase()];
+  const markUsdOf = (sym: string) => opts.priceUsd?.[sym.toUpperCase()];
+  const markWethOf = (sym: string) => {
+    const m = markUsdOf(sym);
+    if (m == null || opts.ethUsd == null || !(opts.ethUsd > 0)) return null;
+    return m / opts.ethUsd;
+  };
   const universe = new Set(
     (opts.buyUniverse.length
       ? opts.buyUniverse
@@ -835,7 +847,7 @@ function buildCoreActions(
       const pnl = pnlOf(h.symbol);
       const pnlNote =
         opts.unrealizedPnlPct && h.symbol.toUpperCase() in opts.unrealizedPnlPct
-          ? ` · uPnL ${pnl >= 0 ? "+" : ""}${pnl.toFixed(1)}%`
+          ? ` · WETH uPnL ${pnl >= 0 ? "+" : ""}${pnl.toFixed(1)}%`
           : "";
       pushSell(
         actions,
@@ -872,7 +884,7 @@ function buildCoreActions(
         actions,
         { symbol: h.symbol, amount: h.amount, usd: h.usd },
         Math.min(h.usd * 0.5, Math.max(minN, h.usd * 0.35)),
-        `Core: take-profit ${h.symbol} (uPnL +${pnl.toFixed(1)}% ≥ ${opts.takeProfitPct}%)${opts.thesisNote}`,
+        `Core: take-profit ${h.symbol} (WETH uPnL +${pnl.toFixed(1)}% ≥ ${opts.takeProfitPct}%)${opts.thesisNote}`,
         1,
         minN,
       );
@@ -886,7 +898,7 @@ function buildCoreActions(
         actions,
         { symbol: h.symbol, amount: h.amount, usd: h.usd },
         Math.min(h.usd * frac, Math.max(minN, h.usd * 0.35)),
-        `Core: stop-loss ${h.symbol} (uPnL ${pnl.toFixed(1)}% ≤ -${opts.stopLossPct}% · trim ~${Math.round(frac * 100)}%)${opts.thesisNote}`,
+        `Core: stop-loss ${h.symbol} (WETH uPnL ${pnl.toFixed(1)}% ≤ -${opts.stopLossPct}% · trim ~${Math.round(frac * 100)}%)${opts.thesisNote}`,
         1,
         minN,
       );
@@ -991,19 +1003,36 @@ function buildCoreActions(
       continue;
     }
 
-    const mark = markOf(sym);
-    const avg = avgOf(sym);
-    if (current > 0 && avg != null && avg > 0 && mark != null) {
-      const maxAdd = avg * (1 - opts.addOnlyDipBps / 10_000);
-      if (mark > maxAdd) {
-        actions.push({
-          action: "hold",
-          reason: `Core: skip add ${sym} — mark $${mark.toFixed(4)} > avg $${avg.toFixed(4)} − ${opts.addOnlyDipBps}bps`,
-          tokenOut: sym,
-          tradeable: true,
-          priority: 0,
-        });
-        continue;
+    const markW = markWethOf(sym);
+    const avgW = avgWethOf(sym);
+    const markUsd = markUsdOf(sym);
+    const avgUsd = avgUsdOf(sym);
+    // Prefer WETH dip check (trading numeraire); fall back to USD
+    if (current > 0) {
+      if (avgW != null && avgW > 0 && markW != null) {
+        const maxAdd = avgW * (1 - opts.addOnlyDipBps / 10_000);
+        if (markW > maxAdd) {
+          actions.push({
+            action: "hold",
+            reason: `Core: skip add ${sym} — mark ${markW.toFixed(6)} WETH > avg ${avgW.toFixed(6)} WETH − ${opts.addOnlyDipBps}bps`,
+            tokenOut: sym,
+            tradeable: true,
+            priority: 0,
+          });
+          continue;
+        }
+      } else if (avgUsd != null && avgUsd > 0 && markUsd != null) {
+        const maxAdd = avgUsd * (1 - opts.addOnlyDipBps / 10_000);
+        if (markUsd > maxAdd) {
+          actions.push({
+            action: "hold",
+            reason: `Core: skip add ${sym} — mark $${markUsd.toFixed(4)} > avg $${avgUsd.toFixed(4)} − ${opts.addOnlyDipBps}bps`,
+            tokenOut: sym,
+            tradeable: true,
+            priority: 0,
+          });
+          continue;
+        }
       }
     }
 

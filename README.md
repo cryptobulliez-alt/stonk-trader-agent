@@ -1,5 +1,9 @@
 # Stonk Trader Shell
 
+> **Disclaimer — work in progress. Use at your own risk.**
+>
+> This project is **experimental** software for managing a StonkBroker TBA on Robinhood Chain. It is **not** production-finished, **not** audited, and **not** financial, investment, or trading advice. Automated swaps can fail, fill poorly, lose value to fees/slippage/illiquid pools, or behave unexpectedly — including permanent loss of funds. Stock tokens may be **geo-restricted**. You run this **locally**, control your own keys, and are solely responsible for configuration, dry-run vs live mode, and any on-chain activity. Past behavior does not predict future results. If you are unsure, keep **Dry run: ON** and do not broadcast live transactions.
+
 Local, permissionless shell for a **StonkBroker ERC-6551 TBA** on Robinhood Chain.
 
 You host it. You hold the keys. Clone → fill `.env` → open the dashboard.

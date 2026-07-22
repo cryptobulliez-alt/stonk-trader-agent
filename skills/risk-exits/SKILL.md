@@ -13,12 +13,13 @@ Exits are portfolio **constraints** (CFA-style), not vibes. Pre-define upside/do
 
 ## Agent rules
 
-1. **Stop-loss** — uPnL% ≤ −`stopLossPct` → **risk exit**. Must clear fee gate at min notional even when **dollar uPnL is negative** (otherwise stops never fire).
-2. **Take-profit** — uPnL% ≥ `takeProfitPct` → **risk exit** trim into cash.
+1. **Stop-loss** — WETH-relative uPnL% ≤ −`stopLossPct` → **risk exit**. Clears fee gate at min notional even when **dollar** uPnL is negative.
+2. **Take-profit** — WETH-relative uPnL% ≥ `takeProfitPct` → **risk exit** trim into cash.
 3. Deep stops (breach ≥1.5× `stopLossPct`) → trim a **larger** fraction of the position.
-4. Thesis / X bearish mid-band trims are **discretionary** — need uPnL ≥ estimated sell fees unless TP/SL already breached.
+4. Thesis / X bearish mid-band trims are **discretionary** — need edge ≥ estimated sell fees unless TP/SL already breached.
 5. Cash-restore sells may proceed with weak uPnL when cash is critically low.
 6. Do not widen a stop after entry to "give it room." Widen the *policy* setting if RH token noise is high — not the live stop.
+7. **Numeraire = WETH** — measure stock sleeve vs idle WETH (the pair you trade). USD NAV is for reporting; ETH/USD noise must not drive stops.
 
 ## Trim fractions (guidance)
 

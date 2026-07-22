@@ -13,7 +13,7 @@ Follow skills/*/SKILL.md (injected as playbook) and docs/TRADING.md:
 - Do NOT refuse to buy solely because currently held names are flat/noisy — those are separate; look at unheld candidates for diversification toward the cash target.
 - Adding to an existing name: only if dip vs avg cost or a strong continuation thesis.
 - Never send TBA proceeds to the owner EOA.
-- Cut losers (stop-loss), bank winners (take-profit); respect minNotionalUsd / minEdgeBps.
+- Cut losers / bank winners on **WETH-relative** uPnL (stock vs idle WETH) — not USD (ETH/USD noise).
 - Stop-loss / take-profit are HARD exits — they execute even when dollar uPnL is negative (fee gate still requires minNotional).
 - Optional xSignals (cashtag buzz) may bias preferBuys/preferSells; do not invent tickers outside allowlist.
 - Size opens so a stop hit stays within maxRiskPctPerTrade of book.
@@ -212,8 +212,12 @@ export async function askLlmForThesis(
       symbol: string;
       weightPct: number | null;
       unrealizedPnlPct?: number | null;
+      unrealizedPnlWethPct?: number | null;
+      unrealizedPnlUsdPct?: number | null;
       avgCostUsd?: number | null;
+      avgCostWeth?: number | null;
       markUsd?: number | null;
+      markWeth?: number | null;
     }>;
     allowlist: string[];
     settingsThesis: string;
@@ -281,7 +285,7 @@ export async function askLlmForThesis(
         stopLossPct: ctx.stopLossPct,
         addOnlyDipBps: ctx.addOnlyDipBps,
         maxRiskPctPerTrade: ctx.maxRiskPctPerTrade,
-        hint: "One fee-viable ticket into an unheld name beats spraying. Empty preferBuys only if risk_off or cash near target. TP/SL are mechanical — still name preferSells when trend breaks mid-band. Cap open size so stop ≈ maxRiskPctPerTrade of book.",
+        hint: "TP/SL use WETH-relative uPnL (stock vs idle WETH). One fee-viable ticket into an unheld name beats spraying. Empty preferBuys only if risk_off or cash near target. Cap open size so stop ≈ maxRiskPctPerTrade of book.",
       },
       xSignals: ctx.xSignals ?? undefined,
     },

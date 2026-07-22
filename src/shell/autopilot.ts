@@ -27,11 +27,13 @@ import { loadSettings } from "./settings.js";
 import { evaluateEoaGasReserve, evaluateFeeGate, isRiskExitReason } from "./tradeEconomics.js";
 import { fetchXSignals, mergeXHints } from "./xSignals.js";
 import { loadTradingSkills } from "./skills.js";
+import { classifyResearchNeed } from "./researchGate.js";
 import { getAssetBySymbol } from "../assets.js";
 import { priceTokenUsd } from "../prices.js";
-import { formatEther } from "viem";
-import { ownerAccount } from "../config.js";
+import { formatEther, type Hash } from "viem";
+import { ownerAccount, STOCK_TOKENS, TOKEN_DECIMALS } from "../config.js";
 import { isRpcRateLimitError, summarizeRpcError } from "../rpcTransport.js";
+import { actualTokenInFromTx, assertFillSane } from "./fillVerify.js";
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let passInFlight = false;
@@ -149,16 +151,26 @@ async function runPass(): Promise<void> {
       addOnlyDipBps: settings.addOnlyDipBps,
       maxRiskPctPerTrade: settings.maxRiskPctPerTrade,
     });
-    const holdings = enrichHoldings(tokenId, preview.holdings);
+    const holdings = enrichHoldings(tokenId, preview.holdings, preview.ethUsd);
     const unrealizedPnlPct = Object.fromEntries(
       holdings
-        .filter((h) => h.unrealizedPnlPct != null)
-        .map((h) => [h.symbol.toUpperCase(), h.unrealizedPnlPct as number]),
+        .filter((h) => h.unrealizedPnlWethPct != null)
+        .map((h) => [h.symbol.toUpperCase(), h.unrealizedPnlWethPct as number]),
     );
     const avgCostUsd = Object.fromEntries(
       holdings
         .filter((h) => h.avgCostUsd != null && h.avgCostUsd > 0)
         .map((h) => [h.symbol.toUpperCase(), h.avgCostUsd as number]),
+    );
+    const avgCostWeth = Object.fromEntries(
+      holdings
+        .filter((h) => h.avgCostWeth != null && h.avgCostWeth > 0)
+        .map((h) => [h.symbol.toUpperCase(), h.avgCostWeth as number]),
+    );
+    const unrealizedPnlWethBySym = Object.fromEntries(
+      holdings
+        .filter((h) => h.unrealizedPnlWeth != null)
+        .map((h) => [h.symbol.toUpperCase(), h.unrealizedPnlWeth as number]),
     );
     const unrealizedPnlUsdBySym = Object.fromEntries(
       holdings
@@ -223,14 +235,57 @@ async function runPass(): Promise<void> {
       .map((h) => h.symbol.toUpperCase())
       .filter((s) => !["WETH", "ETH", "USDG", "STONKBROKER"].includes(s));
 
-    let xDigest = await fetchXSignals({
-      bearerToken: settings.useXSignals ? config.xBearerToken : null,
-      symbols: [
-        ...new Set([...settings.allowlist, ...heldStockSyms]),
-      ],
+    const holdingUsdBySym = Object.fromEntries(
+      holdings
+        .filter((h) => h.usd != null && h.usd > 0)
+        .map((h) => [h.symbol.toUpperCase(), h.usd as number]),
+    );
+
+    const research = classifyResearchNeed({
+      mode: settings.researchRails,
+      cashPct: preview.cashPct,
+      reserveWethPct: settings.reserveWethPct,
+      unrealizedPnlWethPct: unrealizedPnlPct,
+      takeProfitPct: settings.takeProfitPct,
+      stopLossPct: settings.stopLossPct,
+      allowlist: settings.allowlist,
       heldSymbols: heldStockSyms,
+      settingsThesis: settings.thesis,
+      minNotionalUsd: settings.minNotionalUsd,
+      holdingUsdBySym,
     });
-    if (settings.useXSignals) {
+
+    emitEvent(
+      research.needLlm || research.needX ? "agent.plan" : "agent.research",
+      research.needLlm || research.needX
+        ? `Research rails on — ${research.reason}`
+        : `Research skipped — ${research.reason}`,
+      {
+        needLlm: research.needLlm,
+        needX: research.needX,
+        reason: research.reason,
+        takeProfitHits: research.takeProfitHits,
+        stopLossHits: research.stopLossHits,
+        cashExcessPct: research.cashExcessPct,
+      },
+    );
+
+    // Empty digest when X not needed (no network)
+    let xDigest: Awaited<ReturnType<typeof fetchXSignals>> = {
+      ok: false,
+      source: "skipped",
+      reason: research.reason,
+      symbols: [],
+      preferBuysHint: [],
+      preferSellsHint: [],
+      summary: "X signals skipped (mechanical pass)",
+    };
+    if (settings.useXSignals && research.needX) {
+      xDigest = await fetchXSignals({
+        bearerToken: config.xBearerToken,
+        symbols: [...new Set([...settings.allowlist, ...heldStockSyms])],
+        heldSymbols: heldStockSyms,
+      });
       const softSkip =
         !xDigest.ok &&
         (xDigest.reason?.includes("X_BEARER") ||
@@ -245,9 +300,11 @@ async function runPass(): Promise<void> {
           reason: xDigest.reason,
         },
       );
+    } else if (settings.useXSignals) {
+      emitEvent("agent.x", xDigest.summary, { reason: research.reason });
     }
 
-    if (config.llmApiKey) {
+    if (config.llmApiKey && research.needLlm) {
       setAgentState("thinking", "Asking LLM for thesis");
       try {
         const plan = await askLlmForThesis(config, {
@@ -256,8 +313,11 @@ async function runPass(): Promise<void> {
           holdings: holdings.map((h) => ({
             symbol: h.symbol,
             weightPct: h.weightPct,
-            unrealizedPnlPct: h.unrealizedPnlPct,
+            unrealizedPnlWethPct: h.unrealizedPnlWethPct,
+            unrealizedPnlUsdPct: h.unrealizedPnlUsdPct,
+            avgCostWeth: h.avgCostWeth,
             avgCostUsd: h.avgCostUsd,
+            markWeth: h.markWeth,
             markUsd: h.markUsd ?? h.priceUsd,
           })),
           allowlist: settings.allowlist,
@@ -307,7 +367,6 @@ async function runPass(): Promise<void> {
         ) {
           const held = new Set(heldStockSyms);
           const unheld = settings.allowlist.filter((s) => !held.has(s));
-          // Prefer X-bullish unheld when available
           const xPick = xDigest.preferBuysHint.find((s) => unheld.includes(s));
           if (xPick || unheld.length) {
             preferBuys = [xPick ?? unheld[0]];
@@ -330,41 +389,73 @@ async function runPass(): Promise<void> {
           "agent.warn",
           err instanceof Error ? err.message : String(err),
         );
+        // Fall through to mechanical thesis / preferBuys
+        thesis = research.mechanicalThesis;
+        if (!preferBuys.length && research.mechanicalPreferBuys.length) {
+          preferBuys = [...research.mechanicalPreferBuys];
+        }
       }
+    } else if (!research.needLlm) {
+      thesis = research.mechanicalThesis;
+      if (!preferBuys.length && research.mechanicalPreferBuys.length) {
+        preferBuys = [...research.mechanicalPreferBuys];
+      }
+      emitEvent(
+        "agent.plan",
+        `mechanical · buys=${preferBuys.join(",") || "—"} · sells=${
+          [...research.stopLossHits, ...research.takeProfitHits].join(",") || "—"
+        }`,
+        {
+          preferBuys,
+          stopLossHits: research.stopLossHits,
+          takeProfitHits: research.takeProfitHits,
+          reason: research.reason,
+        },
+      );
     } else if (preferBuys.length) {
       emitEvent(
         "agent.plan",
-        `no LLM — preferBuys from thesis notes: ${preferBuys.join(",")}`,
+        `no LLM key — preferBuys from thesis notes: ${preferBuys.join(",")}`,
+        { preferBuys },
+      );
+    } else if (research.mechanicalPreferBuys.length) {
+      preferBuys = [...research.mechanicalPreferBuys];
+      thesis = research.mechanicalThesis;
+      emitEvent(
+        "agent.plan",
+        `no LLM key — mechanical deploy ${preferBuys[0]}`,
         { preferBuys },
       );
     }
 
-    // Soft-merge X buzz hints (sells always; buys when cash has room above reserve)
-    const cashPctForHints = preview.cashPct ?? 0;
-    const cashExcessForHints = cashPctForHints - settings.reserveWethPct;
-    const merged = mergeXHints({
-      preferBuys,
-      preferSells,
-      digest: xDigest,
-      allowlist: settings.allowlist,
-      heldSymbols: heldStockSyms,
-      allowBuyHints: cashExcessForHints >= 5,
-    });
-    if (
-      merged.preferBuys.join() !== preferBuys.join() ||
-      merged.preferSells.join() !== preferSells.join()
-    ) {
-      emitEvent(
-        "agent.plan",
-        `X hints merged · buys=${merged.preferBuys.join(",") || "—"} · sells=${merged.preferSells.join(",") || "—"}`,
-        {
-          before: { preferBuys, preferSells },
-          after: merged,
-        },
-      );
+    // Soft-merge X buzz only when we actually fetched it
+    if (research.needX && xDigest.ok) {
+      const cashPctForHints = preview.cashPct ?? 0;
+      const cashExcessForHints = cashPctForHints - settings.reserveWethPct;
+      const merged = mergeXHints({
+        preferBuys,
+        preferSells,
+        digest: xDigest,
+        allowlist: settings.allowlist,
+        heldSymbols: heldStockSyms,
+        allowBuyHints: cashExcessForHints >= 5,
+      });
+      if (
+        merged.preferBuys.join() !== preferBuys.join() ||
+        merged.preferSells.join() !== preferSells.join()
+      ) {
+        emitEvent(
+          "agent.plan",
+          `X hints merged · buys=${merged.preferBuys.join(",") || "—"} · sells=${merged.preferSells.join(",") || "—"}`,
+          {
+            before: { preferBuys, preferSells },
+            after: merged,
+          },
+        );
+      }
+      preferBuys = merged.preferBuys;
+      preferSells = merged.preferSells;
     }
-    preferBuys = merged.preferBuys;
-    preferSells = merged.preferSells;
 
     setLastThesis(thesis);
     emitEvent("agent.thesis", thesis);
@@ -384,6 +475,7 @@ async function runPass(): Promise<void> {
       slippageBps: config.slippageBps,
       unrealizedPnlPct,
       avgCostUsd,
+      avgCostWeth,
       minNotionalUsd: settings.minNotionalUsd,
       takeProfitPct: settings.takeProfitPct,
       stopLossPct: settings.stopLossPct,
@@ -391,6 +483,20 @@ async function runPass(): Promise<void> {
       maxRiskPctPerTrade: settings.maxRiskPctPerTrade,
       maxNamePct: 40,
     });
+
+    for (const p of plan.prepared) {
+      if ("error" in p && p.error) {
+        emitEvent(
+          "agent.error",
+          `Prepare blocked ${p.action.tokenIn}→${p.action.tokenOut}: ${p.error}`,
+          {
+            tokenIn: p.action.tokenIn,
+            tokenOut: p.action.tokenOut,
+            reason: p.action.reason,
+          },
+        );
+      }
+    }
 
     const cashPct = preview.cashPct ?? 100;
     const reserve = settings.reserveWethPct;
@@ -437,7 +543,13 @@ async function runPass(): Promise<void> {
           : (a.tokenOut ?? "").toUpperCase();
       const holdingUsd =
         holdings.find((h) => h.symbol.toUpperCase() === stockSym)?.usd ?? 0;
-      const uPnlTotal = unrealizedPnlUsdBySym[stockSym] ?? 0;
+      const uPnlWethTotal = unrealizedPnlWethBySym[stockSym] ?? 0;
+      const ethUsd = preview.ethUsd;
+      // Fee gate compares $ friction — convert WETH uPnL when available
+      const uPnlTotal =
+        ethUsd != null && ethUsd > 0 && unrealizedPnlWethBySym[stockSym] != null
+          ? uPnlWethTotal * ethUsd
+          : (unrealizedPnlUsdBySym[stockSym] ?? 0);
       const unrealizedPnlUsd =
         side === "sell" && holdingUsd > 0
           ? uPnlTotal * (Math.min(notionalUsd, holdingUsd) / holdingUsd)
@@ -642,6 +754,7 @@ async function runPass(): Promise<void> {
           action: a,
           marks,
           dryRun: true,
+          ethUsd: preview.ethUsd,
         });
         recordTrade({
           tokenId,
@@ -715,6 +828,80 @@ async function runPass(): Promise<void> {
               if (!primaryHash || /swap/i.test(r.what)) primaryHash = r.hash;
             }
           }
+
+          let actualStockQty: number | null = null;
+          if (ok && primaryHash && item.action.side === "buy") {
+            const outSym = (item.action.tokenOut ?? "").toUpperCase();
+            const tokenAddr = STOCK_TOKENS[outSym];
+            const dec = TOKEN_DECIMALS[outSym] ?? 18;
+            const minOut = Number(item.prepared.amountOutMinimum ?? 0);
+            const expected = Number(
+              item.prepared.expectedAmountOut ?? item.prepared.fairAmountOut ?? 0,
+            );
+            if (tokenAddr) {
+              const got = await actualTokenInFromTx({
+                client,
+                hash: primaryHash as Hash,
+                token: tokenAddr,
+                recipient: session.tba,
+                decimals: dec,
+              });
+              if (got) {
+                actualStockQty = got.human;
+                try {
+                  assertFillSane({
+                    side: "buy",
+                    receivedHuman: got.human,
+                    minOutHuman: minOut > 0 ? minOut : got.human,
+                    expectedHuman: expected > 0 ? expected : undefined,
+                    symbol: outSym,
+                  });
+                } catch (fillErr) {
+                  const msg =
+                    fillErr instanceof Error ? fillErr.message : String(fillErr);
+                  emitEvent("agent.error", msg, {
+                    hash: primaryHash,
+                    received: got.human,
+                    minOut,
+                    expected,
+                  });
+                  recordTrade({
+                    tokenId,
+                    side: item.action.side,
+                    tokenIn: item.action.tokenIn,
+                    tokenOut: item.action.tokenOut,
+                    amountIn: item.action.amountIn,
+                    notionalUsd: item.action.notionalUsd,
+                    reason: item.action.reason,
+                    dryRun: false,
+                    status: "error",
+                    ethUsd: preview.ethUsd,
+                    error: msg,
+                    txs: results.map((r) => ({
+                      what: r.what,
+                      hash: r.hash,
+                      dryRun: r.dryRun,
+                      valueEth: r.valueEth,
+                      gasUsed: r.gasUsed,
+                      effectiveGasPriceWei: r.effectiveGasPriceWei,
+                      gasFeeEth: r.gasFeeEth,
+                    })),
+                  });
+                  // Book dust truthfully so ledger matches chain
+                  recordActionFill({
+                    tokenId,
+                    action: item.action,
+                    marks,
+                    dryRun: false,
+                    ethUsd: preview.ethUsd,
+                    actualStockQty,
+                  });
+                  continue;
+                }
+              }
+            }
+          }
+
           recordTrade({
             tokenId,
             side: item.action.side,
@@ -742,6 +929,8 @@ async function runPass(): Promise<void> {
               action: item.action,
               marks,
               dryRun: false,
+              ethUsd: preview.ethUsd,
+              actualStockQty,
             });
             if (settings.postToX) {
               enqueueSwapTweet(item.action, {

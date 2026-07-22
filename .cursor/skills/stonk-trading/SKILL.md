@@ -37,6 +37,7 @@ When changing trading logic, read and respect runtime skill packs under [`skills
 ## Additional packs
 
 - [cash-core](../../../skills/cash-core/SKILL.md)
+- [weth-numeraire](../../../skills/weth-numeraire/SKILL.md)
 - [position-sizing](../../../skills/position-sizing/SKILL.md)
 - [risk-exits](../../../skills/risk-exits/SKILL.md)
 - [selective-entries](../../../skills/selective-entries/SKILL.md)

@@ -32,6 +32,12 @@ import {
   quoteV4ExactIn,
   V4,
 } from "./v4.js";
+import {
+  applyMinOutFloors,
+  checkSwapQuoteVsMark,
+  markBasedMinOut,
+  MAX_EXEC_VS_MARK_BPS,
+} from "./swapSanity.js";
 
 function requireAddress(label: string, value: string | undefined): Address {
   if (!value || !isAddress(value)) {
@@ -257,18 +263,59 @@ async function prepareV4Trade(
   }
 
   const zeroForOne = buyStock; // ETH→stock
+  const spot = await quoteV4ExactIn(client, pool.key, zeroForOne, amountIn);
+  if (spot === 0n) {
+    throw new Error("verification failed: v4 quoter returned 0");
+  }
+
+  const sanity = await checkSwapQuoteVsMark(client, {
+    buyStock,
+    stock: {
+      symbol: stock.symbol,
+      address: stock.address,
+      decimals: stock.decimals,
+    },
+    amountIn,
+    quotedOut: spot,
+    engine: "v4",
+  });
+  if (!sanity.ok) {
+    throw new Error(`verification failed: ${sanity.reason}`);
+  }
+
+  const markFloor = markBasedMinOut({
+    fairOutHuman: sanity.fairOutHuman,
+    outDecimals: sanity.outDecimals,
+    slippageBps,
+  });
   let minOut: bigint;
   if (args.minAmountOut != null && args.minAmountOut !== "") {
     minOut = parseUnits(args.minAmountOut, buyStock ? stock.decimals : 18);
-  } else {
-    const spot = await quoteV4ExactIn(client, pool.key, zeroForOne, amountIn);
-    if (spot === 0n) {
-      throw new Error("verification failed: v4 quoter returned 0");
+    if (minOut < markFloor) {
+      throw new Error(
+        `verification failed: explicit minAmountOut ${args.minAmountOut} below mark floor ${formatUnits(markFloor, sanity.outDecimals)}`,
+      );
     }
-    minOut = (spot * BigInt(10_000 - slippageBps)) / 10_000n;
+  } else {
+    minOut = applyMinOutFloors({
+      quotedOut: spot,
+      slippageBps,
+      markFloor,
+    });
   }
   if (minOut <= 0n) {
     throw new Error("verification failed: refused zero amountOutMinimum");
+  }
+  // Final hard check: minOut must be within band of fair (never dust vs mark)
+  if (minOut < markFloor) {
+    throw new Error(
+      `verification failed: amountOutMinimum ${formatUnits(minOut, sanity.outDecimals)} < mark floor ${formatUnits(markFloor, sanity.outDecimals)}`,
+    );
+  }
+  if (spot < minOut) {
+    throw new Error(
+      `verification failed: v4 quote ${formatUnits(spot, sanity.outDecimals)} cannot meet minOut ${formatUnits(minOut, sanity.outDecimals)} (mark ${sanity.markSource}) — pool too thin`,
+    );
   }
 
   const { data: urData, value: urValue } = encodeV4ExactInExecute({
@@ -346,6 +393,11 @@ async function prepareV4Trade(
       amountIn: args.amountInHuman,
       amountOutMinimum: formatUnits(minOut, buyStock ? stock.decimals : 18),
       amountOutMinimumRaw: minOut.toString(),
+      expectedAmountOut: formatUnits(spot, buyStock ? stock.decimals : 18),
+      fairAmountOut: sanity.fairOutHuman.toPrecision(8),
+      markUsd: sanity.markUsd,
+      markSource: sanity.markSource,
+      quoteVsMarkBps: sanity.vsMarkBps,
       slippageBps,
       /** Inner executeCall value (TBA → router). Outer owner msg.value is 0. */
       callValue: urValue.toString(),
@@ -355,7 +407,8 @@ async function prepareV4Trade(
         owner: "from matches ownerOf",
         engine: "UniversalRouter V4_SWAP → PoolManager",
         pool: formatV4Pool(pool),
-        priceFloor: "v4 quoter − slippage",
+        priceFloor: `max(v4 quoter, independent mark) − slip; refuse if >${MAX_EXEC_VS_MARK_BPS / 100}% under mark`,
+        quoteVsMarkBps: sanity.vsMarkBps,
         funding: buyStock
           ? "TBA native ETH (unwrap WETH first if needed); EOA pays gas only"
           : "ERC-20 settle via Permit2",
@@ -391,6 +444,13 @@ async function prepareV4Trade(
     approveFirst: steps.length > 1 ? steps[0] : undefined,
     signOrder: `Sign in order: ${signOrder.join(" → ")}. Output stays in TBA.`,
     route: formatV4Pool(pool),
+    amountOutMinimum: formatUnits(minOut, buyStock ? stock.decimals : 18),
+    amountOutMinimumRaw: minOut.toString(),
+    expectedAmountOut: formatUnits(spot, buyStock ? stock.decimals : 18),
+    fairAmountOut: sanity.fairOutHuman.toPrecision(8),
+    markUsd: sanity.markUsd,
+    markSource: sanity.markSource,
+    quoteVsMarkBps: sanity.vsMarkBps,
   };
 }
 
@@ -435,16 +495,61 @@ async function prepareV3Trade(
   }
 
   let minOut: bigint;
+  let spotOut: bigint;
+  let sanityNote: Record<string, unknown> = {};
   if (args.minAmountOut != null && args.minAmountOut !== "") {
     minOut = parseUnits(args.minAmountOut, tokenOut.decimals);
+    spotOut = minOut;
   } else {
-    const spotOut = await quoteTradeRoute(client, route, tokenIn.address, amountIn);
+    spotOut = await quoteTradeRoute(client, route, tokenIn.address, amountIn);
     if (spotOut === 0n) {
       throw new Error(
         "verification failed: live spot quote is zero — pass explicit minAmountOut or retry",
       );
     }
-    minOut = (spotOut * BigInt(10_000 - slippageBps)) / 10_000n;
+
+    const buyStock = ["WETH", "ETH"].includes(tokenIn.symbol);
+    const sellStock = ["WETH", "ETH"].includes(tokenOut.symbol);
+    if (buyStock || sellStock) {
+      const stock = buyStock ? tokenOut : tokenIn;
+      const sanity = await checkSwapQuoteVsMark(client, {
+        buyStock,
+        stock: {
+          symbol: stock.symbol,
+          address: stock.address,
+          decimals: stock.decimals,
+        },
+        amountIn,
+        quotedOut: spotOut,
+        engine: route.kind === "direct" ? "v3" : "v3-multihop",
+      });
+      if (!sanity.ok) {
+        throw new Error(`verification failed: ${sanity.reason}`);
+      }
+      const markFloor = markBasedMinOut({
+        fairOutHuman: sanity.fairOutHuman,
+        outDecimals: sanity.outDecimals,
+        slippageBps,
+      });
+      minOut = applyMinOutFloors({
+        quotedOut: spotOut,
+        slippageBps,
+        markFloor,
+      });
+      if (spotOut < minOut) {
+        throw new Error(
+          `verification failed: v3 quote cannot meet mark floor minOut — pool too thin vs ${sanity.markSource}`,
+        );
+      }
+      sanityNote = {
+        fairAmountOut: sanity.fairOutHuman.toPrecision(8),
+        markUsd: sanity.markUsd,
+        markSource: sanity.markSource,
+        quoteVsMarkBps: sanity.vsMarkBps,
+      };
+    } else {
+      minOut = (spotOut * BigInt(10_000 - slippageBps)) / 10_000n;
+    }
   }
   if (minOut <= 0n) {
     throw new Error(
@@ -509,6 +614,8 @@ async function prepareV3Trade(
     amountIn: args.amountInHuman,
     amountOutMinimum: formatUnits(minOut, tokenOut.decimals),
     amountOutMinimumRaw: minOut.toString(),
+    expectedAmountOut: formatUnits(spotOut, tokenOut.decimals),
+    ...sanityNote,
     route: routeNote,
     routeDetail: route,
     slippageBps,
@@ -517,7 +624,10 @@ async function prepareV3Trade(
       owner: "from matches ownerOf",
       balance: `TBA holds >= ${args.amountInHuman} ${tokenIn.symbol}`,
       route: routeNote,
-      priceFloor: "amountOutMinimum set from live slot0 quote − slippage",
+      priceFloor:
+        Object.keys(sanityNote).length > 0
+          ? `max(venue quote, independent mark) − slip; refuse if >${MAX_EXEC_VS_MARK_BPS / 100}% under mark`
+          : "amountOutMinimum set from live quote − slippage",
     },
   });
 

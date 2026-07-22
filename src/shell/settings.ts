@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ManagePolicy } from "../portfolioManage.js";
+import type { ResearchRailsMode } from "./researchGate.js";
 
 export type ShellSettings = {
   policy: ManagePolicy;
@@ -13,10 +14,14 @@ export type ShellSettings = {
   maxActionsPerPass: number;
   postToX: boolean;
   /**
-   * When true and X_BEARER_TOKEN is set, fetch recent cashtag buzz each pass
-   * and bias preferBuys / preferSells (plus LLM context).
+   * When true and X_BEARER_TOKEN is set, fetch recent cashtag buzz when research is needed.
    */
   useXSignals: boolean;
+  /**
+   * auto = skip LLM/X when TP/SL/cash-restore/near-target are obvious;
+   * always = call research every pass; off = never call LLM/X.
+   */
+  researchRails: ResearchRailsMode;
   thesis: string;
   /** When true, prepare/log only — no broadcast. When false, live txs. */
   dryRun: boolean;
@@ -51,6 +56,7 @@ const DEFAULTS: ShellSettings = {
   maxActionsPerPass: 3,
   postToX: true,
   useXSignals: true,
+  researchRails: "auto",
   thesis: "",
   dryRun: true,
   minNotionalUsd: 3,
@@ -113,6 +119,7 @@ function normalize(s: ShellSettings): ShellSettings {
     maxActionsPerPass: clamp(Number(s.maxActionsPerPass) || 3, 1, 10),
     postToX: Boolean(s.postToX),
     useXSignals: s.useXSignals === undefined ? true : Boolean(s.useXSignals),
+    researchRails: normalizeResearchRails(s.researchRails),
     thesis: typeof s.thesis === "string" ? s.thesis : "",
     dryRun: s.dryRun === undefined ? true : Boolean(s.dryRun),
     minNotionalUsd: Math.max(1, Number(s.minNotionalUsd) || 3),
@@ -138,6 +145,12 @@ function normalize(s: ShellSettings): ShellSettings {
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
+}
+
+function normalizeResearchRails(raw: unknown): ResearchRailsMode {
+  const v = String(raw ?? "auto").toLowerCase();
+  if (v === "always" || v === "off" || v === "auto") return v;
+  return "auto";
 }
 
 export function saveSettings(patch: Partial<ShellSettings>): ShellSettings {

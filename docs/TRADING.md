@@ -85,10 +85,11 @@ Use these as **principles**, adapted to a fee-heavy on-chain sleeve (not day-tra
 
 ### Exits (sells)
 
-8. **Stop-loss** — unrealized P&L % ≤ −`stopLossPct` → **risk exit**. Clears fee gate when notional ≥ `minNotionalUsd` even if dollar uPnL is negative (otherwise stops can never fire on losers).  
-9. **Take-profit** — unrealized P&L % ≥ `takeProfitPct` → **risk exit** trim (bank gains into cash); same min-notional rule, not discretionary uPnL≥cost.  
-10. **Thesis sells** — `preferSells` / risk-off / X bearish buzz may trim mid-band (still need uPnL ≥ estimated sell fees unless the name has already breached TP/SL).  
-11. Cash-restore sells may proceed with weak uPnL when cash is critically low (liquidity &gt; purity).
+8. **Stop-loss** — **WETH-relative** unrealized P&L % ≤ −`stopLossPct` → **risk exit**. Clears fee gate when notional ≥ `minNotionalUsd` even if dollar uPnL is negative.  
+9. **Take-profit** — **WETH-relative** unrealized P&L % ≥ `takeProfitPct` → **risk exit** trim (bank gains into cash).  
+10. **Thesis sells** — `preferSells` / risk-off / X bearish buzz may trim mid-band (still need edge ≥ estimated sell fees unless the name has already breached TP/SL).  
+11. Cash-restore sells may proceed with weak uPnL when cash is critically low (liquidity &gt; purity).  
+11b. **Numeraire** — stock sleeve P&L is vs idle WETH (the pair you trade). USD NAV is for reporting; ETH/USD noise must not drive stops.
 
 ### Process hygiene
 

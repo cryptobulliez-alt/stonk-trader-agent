@@ -8,6 +8,7 @@
   "maxActionsPerPass": 3,
   "postToX": true,
   "useXSignals": true,
+  "researchRails": "auto",
   "thesis": "",
   "dryRun": true,
   "minNotionalUsd": 3,

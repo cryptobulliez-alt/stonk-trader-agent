@@ -7,10 +7,13 @@ Operational skill packs for the Stonk Trader shell. Autopilot loads `## Agent ru
 | Pack | Role |
 | --- | --- |
 | [`cash-core`](./cash-core/SKILL.md) | Reserve cash %, restore dry powder |
+| [`weth-numeraire`](./weth-numeraire/SKILL.md) | Sleeve P&L vs idle WETH (not USD) |
 | [`position-sizing`](./position-sizing/SKILL.md) | Risk-per-trade budget, deploy caps |
 | [`risk-exits`](./risk-exits/SKILL.md) | Stop-loss / take-profit discipline |
 | [`selective-entries`](./selective-entries/SKILL.md) | Thesis opens, no spray, dip-adds |
 | [`fee-ev`](./fee-ev/SKILL.md) | Fee / min-notional EV gate |
+| [`research-thrift`](./research-thrift/SKILL.md) | Skip LLM/X when book marks decide |
+| [`venue-sanity`](./venue-sanity/SKILL.md) | Refuse exec quotes ≪ independent mark |
 | [`social-signals`](./social-signals/SKILL.md) | X buzz as soft bias only |
 | [`onchain-tba`](./onchain-tba/SKILL.md) | TBA funding, gas, no EOA proceeds |
 

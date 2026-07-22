@@ -18,8 +18,9 @@ Risk-based sizing (CIBC / trend-following practice): pick **trade risk** first, 
 2. Never spend below cash reserve; never deploy more than `deployPct` of book **per pass**.
 3. Cap any single name at `maxNamePct` of book (default 40%).
 4. Prefer **one fee-viable ticket** over many dust tickets.
-5. Scale in: add to winners only on dip (`addOnlyDipBps`) unless thesis explicitly pyramids strength.
+5. Scale in: add to winners only on dip vs **avg cost in WETH** (`addOnlyDipBps`) unless thesis explicitly pyramids strength.
 6. Do not size up because of conviction alone — formula + fees win.
+7. Success for the sleeve = **more WETH over time** vs idle WETH — not maximizing USD NAV through ETH beta.
 
 ## Formula (mechanical)
 
