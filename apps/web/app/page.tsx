@@ -119,6 +119,7 @@ type Settings = {
   stopLossPct: number;
   addOnlyDipBps: number;
   estimateGasEth?: number;
+  llmModel?: string;
 };
 
 type ShellEvent = {
@@ -296,6 +297,8 @@ const SETTING_TIPS = {
     "When yes, post a templated tweet after dry-run or live fills. Dry run does not block X.",
   dryRun:
     "ON = prepare and log only, no chain broadcast. OFF = live TBA txs. Toggle also available on the Live tab.",
+  llmModel:
+    "Chat model for thesis / preferBuys each autopilot pass. Listed from the connected provider API when possible.",
 } as const;
 
 /**
@@ -670,6 +673,27 @@ export default function HomePage() {
   const [allowModalOpen, setAllowModalOpen] = useState(false);
   const [allowDraft, setAllowDraft] = useState<string[]>([]);
   const [allowFilter, setAllowFilter] = useState("");
+  const [xAccount, setXAccount] = useState<{
+    id: string;
+    name: string;
+    username: string;
+    profileImageUrl: string | null;
+    url: string;
+  } | null>(null);
+  const [xAccountError, setXAccountError] = useState<string | null>(null);
+  const [xAccountLoading, setXAccountLoading] = useState(false);
+  const [llmConnection, setLlmConnection] = useState<{
+    provider: string;
+    currentModel: string;
+    defaultModel: string;
+    models: Array<{ id: string; label: string }>;
+    source: string;
+    error?: string;
+  } | null>(null);
+  const [llmConnectionError, setLlmConnectionError] = useState<string | null>(
+    null,
+  );
+  const [llmConnectionLoading, setLlmConnectionLoading] = useState(false);
 
   function goTab(next: Tab) {
     setTab(next);
@@ -820,6 +844,81 @@ export default function HomePage() {
       void refreshTrades().catch((e: Error) => setError(e.message));
     }
   }, [tab]);
+
+  // Load connected X profile when Settings is open and X_* is configured
+  useEffect(() => {
+    if (tab !== "settings" || !status?.env.hasX) {
+      return;
+    }
+    let cancelled = false;
+    setXAccountLoading(true);
+    void (async () => {
+      try {
+        const res = await api<{
+          ok: true;
+          configured: boolean;
+          account: {
+            id: string;
+            name: string;
+            username: string;
+            profileImageUrl: string | null;
+            url: string;
+          } | null;
+          error?: string;
+        }>("/api/x/me");
+        if (cancelled) return;
+        setXAccount(res.account);
+        setXAccountError(res.error ?? null);
+      } catch (e) {
+        if (cancelled) return;
+        setXAccount(null);
+        setXAccountError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setXAccountLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, status?.env.hasX]);
+
+  // Load connected LLM + model list when Settings is open
+  useEffect(() => {
+    if (tab !== "settings" || !status?.env.hasLlm) {
+      return;
+    }
+    let cancelled = false;
+    setLlmConnectionLoading(true);
+    void (async () => {
+      try {
+        const res = await api<{
+          ok: true;
+          configured: boolean;
+          connection: {
+            provider: string;
+            currentModel: string;
+            defaultModel: string;
+            models: Array<{ id: string; label: string }>;
+            source: string;
+            error?: string;
+          } | null;
+          error?: string;
+        }>("/api/llm/me");
+        if (cancelled) return;
+        setLlmConnection(res.connection);
+        setLlmConnectionError(res.error ?? res.connection?.error ?? null);
+      } catch (e) {
+        if (cancelled) return;
+        setLlmConnection(null);
+        setLlmConnectionError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLlmConnectionLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, status?.env.hasLlm]);
 
   // Refresh trade log when txs land
   useEffect(() => {
@@ -1779,6 +1878,108 @@ export default function HomePage() {
                       </button>
                     )}
                   </div>
+                </div>
+              )}
+
+              {status?.env.hasX && (
+                <div className="addr-block">
+                  <div className="k">Connected X account</div>
+                  {xAccountLoading && !xAccount ? (
+                    <div className="x-account">
+                      <LoadingInline label="Loading profile" />
+                    </div>
+                  ) : xAccount ? (
+                    <div className="x-account">
+                      {xAccount.profileImageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          className="x-account-pfp"
+                          src={xAccount.profileImageUrl}
+                          alt=""
+                          width={48}
+                          height={48}
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="x-account-pfp placeholder" aria-hidden>
+                          X
+                        </div>
+                      )}
+                      <div className="x-account-meta">
+                        {xAccount.name ? (
+                          <div className="x-account-name">{xAccount.name}</div>
+                        ) : null}
+                        <a
+                          className="x-account-handle"
+                          href={xAccount.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          @{xAccount.username}
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="sub" style={{ margin: "6px 0 0" }}>
+                      {xAccountError ??
+                        "X_* is set but profile could not be loaded."}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {status?.env.hasLlm && (
+                <div className="addr-block">
+                  <div className="k">Connected LLM</div>
+                  {llmConnectionLoading && !llmConnection ? (
+                    <div className="x-account">
+                      <LoadingInline label="Loading models" />
+                    </div>
+                  ) : llmConnection ? (
+                    <div className="llm-account">
+                      <div className="llm-provider">
+                        <span className="llm-provider-badge">
+                          {llmConnection.provider}
+                        </span>
+                        <span className="sub">
+                          {llmConnection.source === "api"
+                            ? "models from API"
+                            : "curated list"}
+                        </span>
+                      </div>
+                      <div className="field" style={{ marginTop: 10 }}>
+                        <TipLabel tip={SETTING_TIPS.llmModel}>Model</TipLabel>
+                        <select
+                          value={
+                            settingsDraft.llmModel ||
+                            llmConnection.currentModel
+                          }
+                          onChange={(e) =>
+                            setSettingsDraft({
+                              ...settingsDraft,
+                              llmModel: e.target.value,
+                            })
+                          }
+                        >
+                          {llmConnection.models.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {llmConnectionError ? (
+                        <p className="sub" style={{ margin: "8px 0 0" }}>
+                          {llmConnectionError}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="sub" style={{ margin: "6px 0 0" }}>
+                      {llmConnectionError ??
+                        "LLM_API_KEY is set but models could not be loaded."}
+                    </p>
+                  )}
                 </div>
               )}
 

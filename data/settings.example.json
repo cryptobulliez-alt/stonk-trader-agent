@@ -13,5 +13,6 @@
   "minEdgeBps": 10,
   "takeProfitPct": 3,
   "stopLossPct": 2.5,
-  "addOnlyDipBps": 50
+  "addOnlyDipBps": 50,
+  "llmModel": ""
 }

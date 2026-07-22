@@ -53,3 +53,34 @@ export async function postTextToX(
   const result = await client.v2.tweet(text);
   return { id: result.data.id, text };
 }
+
+export type XAccountInfo = {
+  id: string;
+  name: string;
+  username: string;
+  profileImageUrl: string | null;
+  url: string;
+};
+
+/** Authenticated user for the configured X_* OAuth credentials. */
+export async function getXAccount(
+  config: Pick<AppConfig, "x">,
+): Promise<XAccountInfo | null> {
+  if (!config.x) return null;
+  const client = createXClient(config);
+  const me = await client.v2.me({
+    "user.fields": ["profile_image_url", "name", "username"],
+  });
+  const u = me.data;
+  const username = u.username;
+  const profileImageUrl = u.profile_image_url
+    ? u.profile_image_url.replace("_normal.", "_400x400.")
+    : null;
+  return {
+    id: u.id,
+    name: u.name,
+    username,
+    profileImageUrl,
+    url: `https://x.com/${username}`,
+  };
+}

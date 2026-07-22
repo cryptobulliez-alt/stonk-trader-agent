@@ -230,6 +230,71 @@ button {
   word-break: break-all;
 }
 
+.x-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.x-account-pfp {
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--accent);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #050505;
+}
+
+.x-account-pfp.placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.x-account-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.x-account-name {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.x-account-handle {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.x-account-handle:hover {
+  text-decoration: underline;
+}
+
+.llm-account {
+  margin-top: 6px;
+}
+
+.llm-provider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.llm-provider-badge {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 4px 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .allow-row {
   display: flex;
   gap: 8px;

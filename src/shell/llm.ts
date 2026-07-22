@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppConfig } from "../config.js";
+import { loadSettings } from "./settings.js";
 
 const SYSTEM = `You are a local StonkBroker TBA portfolio agent on Robinhood Chain.
 
@@ -25,6 +26,146 @@ export type LlmPlan = {
   preferSells: string[];
   stance: "risk_on" | "risk_off" | "hold";
 };
+
+export type LlmProvider = "openai" | "anthropic";
+
+export type LlmConnection = {
+  provider: LlmProvider;
+  currentModel: string;
+  defaultModel: string;
+  models: Array<{ id: string; label: string }>;
+  source: "api" | "fallback";
+  error?: string;
+};
+
+const OPENAI_FALLBACK = [
+  "gpt-4o-mini",
+  "gpt-4o",
+  "gpt-4.1-mini",
+  "gpt-4.1",
+  "o4-mini",
+  "o3-mini",
+];
+
+const ANTHROPIC_FALLBACK = [
+  "claude-sonnet-5",
+  "claude-opus-4-8",
+  "claude-haiku-4-5",
+  "claude-sonnet-4-5",
+  "claude-3-5-haiku-latest",
+  "claude-3-5-sonnet-latest",
+];
+
+export function defaultLlmModel(provider: LlmProvider): string {
+  return provider === "anthropic" ? "claude-sonnet-5" : "gpt-4o-mini";
+}
+
+/** Resolve model: settings.json → LLM_MODEL env → provider default. */
+export function resolveLlmModel(config: AppConfig): string {
+  const fromSettings = loadSettings().llmModel?.trim();
+  if (fromSettings) return fromSettings;
+  if (config.llmModel?.trim()) return config.llmModel.trim();
+  return defaultLlmModel(config.llmProvider);
+}
+
+function labelForModel(id: string): string {
+  return id;
+}
+
+function asModelList(ids: string[]): Array<{ id: string; label: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ id: string; label: string }> = [];
+  for (const id of ids) {
+    const clean = id.trim();
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    out.push({ id: clean, label: labelForModel(clean) });
+  }
+  return out;
+}
+
+async function listOpenAiModels(apiKey: string): Promise<string[]> {
+  const res = await fetch("https://api.openai.com/v1/models", {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!res.ok) {
+    throw new Error(`OpenAI models ${res.status}: ${await res.text()}`);
+  }
+  const json = (await res.json()) as { data?: Array<{ id?: string }> };
+  const ids = (json.data ?? [])
+    .map((m) => m.id ?? "")
+    .filter((id) =>
+      /^(gpt-|o[1-9]|chatgpt-)/i.test(id) &&
+      !/instruct|realtime|audio|transcribe|tts|image|search/i.test(id),
+    )
+    .sort((a, b) => a.localeCompare(b));
+  return ids.length ? ids : [...OPENAI_FALLBACK];
+}
+
+async function listAnthropicModels(apiKey: string): Promise<string[]> {
+  const res = await fetch("https://api.anthropic.com/v1/models", {
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Anthropic models ${res.status}: ${await res.text()}`);
+  }
+  const json = (await res.json()) as { data?: Array<{ id?: string }> };
+  const ids = (json.data ?? [])
+    .map((m) => m.id ?? "")
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  return ids.length ? ids : [...ANTHROPIC_FALLBACK];
+}
+
+/** Provider + selectable models for the Settings panel. */
+export async function getLlmConnection(config: AppConfig): Promise<LlmConnection> {
+  const provider = config.llmProvider;
+  const defaultModel = defaultLlmModel(provider);
+  const currentModel = resolveLlmModel(config);
+  if (!config.llmApiKey) {
+    return {
+      provider,
+      currentModel,
+      defaultModel,
+      models: asModelList(
+        provider === "anthropic" ? ANTHROPIC_FALLBACK : OPENAI_FALLBACK,
+      ),
+      source: "fallback",
+      error: "LLM_API_KEY missing",
+    };
+  }
+
+  try {
+    const ids =
+      provider === "anthropic"
+        ? await listAnthropicModels(config.llmApiKey)
+        : await listOpenAiModels(config.llmApiKey);
+    // Ensure current + defaults appear even if API omits them
+    const merged = asModelList([currentModel, defaultModel, ...ids]);
+    return {
+      provider,
+      currentModel,
+      defaultModel,
+      models: merged,
+      source: "api",
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const fallback =
+      provider === "anthropic" ? ANTHROPIC_FALLBACK : OPENAI_FALLBACK;
+    return {
+      provider,
+      currentModel,
+      defaultModel,
+      models: asModelList([currentModel, defaultModel, ...fallback]),
+      source: "fallback",
+      error: message,
+    };
+  }
+}
 
 function playbookSnippet(): string {
   const candidates = [
@@ -136,7 +277,7 @@ export async function askLlmForThesis(
 }
 
 async function callOpenAi(config: AppConfig, user: string): Promise<LlmPlan> {
-  const model = config.llmModel || "gpt-4o-mini";
+  const model = resolveLlmModel(config);
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -168,7 +309,7 @@ async function callOpenAi(config: AppConfig, user: string): Promise<LlmPlan> {
 }
 
 async function callAnthropic(config: AppConfig, user: string): Promise<LlmPlan> {
-  const model = config.llmModel || "claude-sonnet-5";
+  const model = resolveLlmModel(config);
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {

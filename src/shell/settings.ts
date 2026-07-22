@@ -27,6 +27,8 @@ export type ShellSettings = {
   addOnlyDipBps: number;
   /** Optional gas ETH/step override; else trade-log average. */
   estimateGasEth?: number;
+  /** Dashboard override for LLM chat model (else LLM_MODEL / provider default). */
+  llmModel?: string;
 };
 
 const DEFAULTS: ShellSettings = {
@@ -108,6 +110,10 @@ function normalize(s: ShellSettings): ShellSettings {
     estimateGasEth:
       s.estimateGasEth != null && Number(s.estimateGasEth) > 0
         ? Number(s.estimateGasEth)
+        : undefined,
+    llmModel:
+      typeof s.llmModel === "string" && s.llmModel.trim()
+        ? s.llmModel.trim()
         : undefined,
   };
 }

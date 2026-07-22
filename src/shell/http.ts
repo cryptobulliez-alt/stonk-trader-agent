@@ -4,7 +4,7 @@ import { formatEther } from "viem";
 import { stonkBrokersAbi } from "../abis.js";
 import { listStockAssets } from "../assets.js";
 import { makePublicClient } from "../brokerReads.js";
-import { postTextToX } from "../twitter.js";
+import { getXAccount, postTextToX, type XAccountInfo } from "../twitter.js";
 import { formatStonkSwapTweet } from "../swap.js";
 import { loadConfig, loadEnvStatus, ownerAccount, STONKBROKERS_ADDRESS } from "../config.js";
 import {
@@ -35,6 +35,7 @@ import {
   enrichHoldings,
   getLedger,
 } from "./ledger.js";
+import { getLlmConnection, type LlmConnection } from "./llm.js";
 import { loadSettings, saveSettings, type ShellSettings } from "./settings.js";
 import {
   backfillTradeFees,
@@ -46,6 +47,51 @@ import { getEthUsd } from "../prices.js";
 import { evaluateEoaGasReserve, type EoaGasWarn } from "./tradeEconomics.js";
 
 const PORT = Number(process.env.SHELL_PORT || 8788);
+
+let xAccountCache: { at: number; account: XAccountInfo | null } | null = null;
+const X_ACCOUNT_TTL_MS = 5 * 60_000;
+
+let llmConnectionCache: { at: number; connection: LlmConnection } | null = null;
+const LLM_CONNECTION_TTL_MS = 5 * 60_000;
+
+async function loadLlmConnectionCached(): Promise<LlmConnection> {
+  if (
+    llmConnectionCache &&
+    Date.now() - llmConnectionCache.at < LLM_CONNECTION_TTL_MS
+  ) {
+    // Refresh currentModel from settings without re-listing
+    const connection = {
+      ...llmConnectionCache.connection,
+      currentModel: (() => {
+        const cfg = loadConfig();
+        const fromSettings = loadSettings().llmModel?.trim();
+        if (fromSettings) return fromSettings;
+        if (cfg.llmModel?.trim()) return cfg.llmModel.trim();
+        return llmConnectionCache.connection.defaultModel;
+      })(),
+    };
+    return connection;
+  }
+  const connection = await getLlmConnection(loadConfig());
+  llmConnectionCache = { at: Date.now(), connection };
+  return connection;
+}
+
+async function loadXAccountCached(): Promise<XAccountInfo | null> {
+  const env = loadEnvStatus();
+  if (!env.hasX) return null;
+  if (xAccountCache && Date.now() - xAccountCache.at < X_ACCOUNT_TTL_MS) {
+    return xAccountCache.account;
+  }
+  try {
+    const account = await getXAccount(loadConfig());
+    xAccountCache = { at: Date.now(), account };
+    return account;
+  } catch {
+    xAccountCache = { at: Date.now(), account: null };
+    return null;
+  }
+}
 
 type BalancesSnap = {
   eoa: string;
@@ -218,6 +264,18 @@ async function handle(
       const patch = JSON.parse(raw || "{}") as Partial<ShellSettings>;
       const settings = saveSettings(patch);
       balancesCache = null; // refresh eoa gas reserve vs new maxActions / estimateGasEth
+      // Current model may have changed — keep list cache, refresh on next /api/llm/me
+      if (llmConnectionCache) {
+        llmConnectionCache = {
+          ...llmConnectionCache,
+          connection: {
+            ...llmConnectionCache.connection,
+            currentModel:
+              settings.llmModel?.trim() ||
+              llmConnectionCache.connection.currentModel,
+          },
+        };
+      }
       json(res, 200, { ok: true, settings });
       return;
     }
@@ -448,6 +506,57 @@ async function handle(
     if (method === "POST" && path === "/api/agent/once") {
       void runOnce();
       json(res, 200, { ok: true, started: true });
+      return;
+    }
+
+    if (method === "GET" && path === "/api/llm/me") {
+      const env = loadEnvStatus();
+      if (!env.hasLlm) {
+        json(res, 200, { ok: true, configured: false, connection: null });
+        return;
+      }
+      try {
+        const connection = await loadLlmConnectionCached();
+        json(res, 200, { ok: true, configured: true, connection });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        json(res, 200, {
+          ok: true,
+          configured: true,
+          connection: null,
+          error: message,
+        });
+      }
+      return;
+    }
+
+    if (method === "GET" && path === "/api/x/me") {
+      const env = loadEnvStatus();
+      if (!env.hasX) {
+        json(res, 200, { ok: true, configured: false, account: null });
+        return;
+      }
+      try {
+        const account = await loadXAccountCached();
+        if (!account) {
+          json(res, 200, {
+            ok: true,
+            configured: true,
+            account: null,
+            error: "Could not load X profile — check X_* credentials / API access",
+          });
+          return;
+        }
+        json(res, 200, { ok: true, configured: true, account });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        json(res, 200, {
+          ok: true,
+          configured: true,
+          account: null,
+          error: message,
+        });
+      }
       return;
     }
 
