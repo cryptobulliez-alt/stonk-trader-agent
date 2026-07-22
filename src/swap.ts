@@ -184,7 +184,7 @@ export function formatStonkSwapTweet(args: {
   } else if (args.txUrl) {
     lines.push(args.txUrl);
   }
-  lines.push("", "$STONKBROKER  @realstonkbroker");
+  lines.push("", "$STONKBROKER  @realstonkbroker @cryptobullyznft");
   return lines.join("\n").slice(0, 280);
 }
 
