@@ -348,14 +348,23 @@ export async function getStockTokens(client: PublicClient) {
       decimals: 18,
       tradeableViaUniswapV3: routeFromWeth != null,
       tradeableViaUniswapV4: v4 != null,
-      preferredEngine: v4 ? "v4-universal-router" : routeFromWeth ? "v3-swap-router02" : null,
-      routeFromWeth: v4
+      /** Presence only — prepare picks mark-sane venue (settings.swapVenue). */
+      preferredEngine:
+        v4 && routeFromWeth
+          ? "auto-v3-or-v4"
+          : v4
+            ? "v4-universal-router"
+            : routeFromWeth
+              ? "v3-swap-router02"
+              : null,
+      routeFromWeth: routeFromWeth
+        ? routeFromWeth.kind === "direct"
+          ? `v3 direct fee ${routeFromWeth.fee}`
+          : `v3 via ${routeFromWeth.midSymbol} (${routeFromWeth.feeIn}/${routeFromWeth.feeOut})`
+        : null,
+      routeFromEthV4: v4
         ? `v4 ETH/${symbol} fee=${v4.key.fee} tickSpacing=${v4.key.tickSpacing}`
-        : routeFromWeth
-          ? routeFromWeth.kind === "direct"
-            ? `v3 direct fee ${routeFromWeth.fee}`
-            : `v3 via ${routeFromWeth.midSymbol} (${routeFromWeth.feeIn}/${routeFromWeth.feeOut})`
-          : null,
+        : null,
       wethPools,
       usdgPools,
       v4EthPool: v4
@@ -368,9 +377,11 @@ export async function getStockTokens(client: PublicClient) {
         : null,
       note: !tradeable
         ? "No liquid v4 ETH or v3 WETH/USDG route."
-        : v4
-          ? "Preferred: TBA → UniversalRouter V4_SWAP → PoolManager (native ETH leg)."
-          : undefined,
+        : v4 && routeFromWeth
+          ? "Both v3 and v4 routes exist — prepare picks the mark-sane venue (swapVenue=auto|v3|v4)."
+          : v4
+            ? "v4 ETH pool only — TBA → UniversalRouter V4_SWAP."
+            : "v3 WETH/USDG route only — SwapRouter02.",
     });
   }
 

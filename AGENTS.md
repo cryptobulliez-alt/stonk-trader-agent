@@ -30,7 +30,7 @@ Default policy: **`core`** (`reserveWethPct=30`, `deployPct≤15` per pass).
    - Held names → **take-profit / stop-loss vs WETH** (deeper SL → larger trim) (+ thesis sells)  
    - Opens → **only** `preferBuys` (≤2), sized by deploy + **risk budget** (`maxRiskPctPerTrade`)  
 4. **Fee EV gate** — buys need edge/size vs fees; **risk exits (TP/SL/concentration) clear when notional ≥ min** (losers are allowed); thesis trims still need uPnL ≥ sell cost  
-5. Prepare (v4; TBA-funded buys) → sign if Dry run OFF → optional X fill post  
+5. Prepare (mark-sane v3 or v4; TBA-funded buys) → sign if Dry run OFF → optional X fill post  
 6. Repeat on `intervalMs`
 
 **Allowlist = candidates**, not a must-buy list. Empty `preferBuys` → hold is correct.
@@ -48,8 +48,10 @@ Fee defaults: `minNotionalUsd=3`, `minEdgeBps=10`, `takeProfitPct=3`, `stopLossP
 
 ## Engines (B)
 
-- **Preferred:** Uniswap v4 UniversalRouter → PoolManager (ETH↔stock)
-- **Fallback:** V3 SwapRouter02 (incl. WETH→USDG hops)
+- **`swapVenue=auto` (default):** probe v3 + v4; pick the mark-sane quote (junk/thin v4 must lose to good v3)
+- **v4:** UniversalRouter → PoolManager (ETH↔stock) when liquid + mark-ok
+- **v3:** SwapRouter02 (incl. WETH→USDG hops) when liquid + mark-ok
+- Force `v3` / `v4` in Settings when you only want one venue
 
 ## Universe
 

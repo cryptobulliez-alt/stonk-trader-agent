@@ -210,7 +210,7 @@ export function createStonkBrokerMcpServer(): McpServer {
 
   server.tool(
     "prepare_broker_trade",
-    "VERIFICATION-GATED: UNSIGNED TBA txs. Prefers Uniswap v4 UniversalRouter→PoolManager (ETH↔stock, same as live bots); falls back to V3 SwapRouter02. May return steps: unwrapWeth / approvePermit2 / permit2Approve / swap / wrapEth. Output stays in TBA.",
+    "VERIFICATION-GATED: UNSIGNED TBA txs. For ETH/WETH↔stock, probes v3 and v4 and picks the mark-sane venue (or force via preferVenue). Not all names have liquid v4 — junk v4 loses to good v3. May return steps: unwrapWeth / approvePermit2 / permit2Approve / swap / wrapEth. Output stays in TBA.",
     {
       id: z.number().int().min(1).max(4444),
       from: z.string().describe("REQUIRED: current NFT owner (verified against ownerOf)"),
@@ -220,6 +220,10 @@ export function createStonkBrokerMcpServer(): McpServer {
       fee: z.number().int().optional().describe("Prefer this Uniswap fee tier (100/500/3000/10000)"),
       slippageBps: z.number().int().min(1).max(5000).optional().describe("Default 100 = 1%"),
       minAmountOut: z.string().optional().describe("Explicit floor; skips spot quote when set"),
+      preferVenue: z
+        .enum(["auto", "v3", "v4"])
+        .optional()
+        .describe("auto (default from settings.swapVenue) probes both; v3/v4 forces that engine when mark-sane"),
     },
     async (args) => {
       try {

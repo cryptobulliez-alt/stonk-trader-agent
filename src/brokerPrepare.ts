@@ -38,6 +38,13 @@ import {
   markBasedMinOut,
   MAX_EXEC_VS_MARK_BPS,
 } from "./swapSanity.js";
+import {
+  formatVenueProbes,
+  normalizeSwapVenue,
+  selectEthStockVenue,
+  type SwapVenuePref,
+} from "./swapVenue.js";
+import { loadSettings } from "./shell/settings.js";
 
 function requireAddress(label: string, value: string | undefined): Address {
   if (!value || !isAddress(value)) {
@@ -126,8 +133,8 @@ export async function prepareActivateBroker(
 }
 
 /**
- * Prefer Uniswap v4 UniversalRouter (ETH↔stock via PoolManager) — same path as live TBA bots.
- * Fall back to Uniswap v3 SwapRouter02 (incl. WETH→USDG→AAPL multi-hop).
+ * ETH/WETH ↔ stock: probe v3 and v4, pick the mark-sane venue (or force via preferVenue).
+ * Other pairs: Uniswap v3 SwapRouter02 only.
  */
 export async function prepareBrokerTrade(
   client: PublicClient,
@@ -140,6 +147,8 @@ export async function prepareBrokerTrade(
     fee?: number;
     slippageBps?: number;
     minAmountOut?: string;
+    /** auto = pick mark-sane v3/v4; v3/v4 = force that engine when viable. */
+    preferVenue?: SwapVenuePref;
   },
 ): Promise<Record<string, unknown>> {
   const { id } = args;
@@ -163,27 +172,55 @@ export async function prepareBrokerTrade(
   const amountIn = parseUnits(args.amountIn, tokenIn.decimals);
   if (amountIn <= 0n) throw new Error("amountIn must be > 0");
 
-  // V4 path when one side is WETH/ETH and the other is a stock token
   const inIsCash = ["WETH", "ETH"].includes(tokenIn.symbol);
   const outIsCash = ["WETH", "ETH"].includes(tokenOut.symbol);
   if (inIsCash !== outIsCash) {
-    try {
-      return await prepareV4Trade(client, {
-        broker,
-        from,
-        id,
-        tokenIn,
-        tokenOut,
-        amountIn,
-        amountInHuman: args.amountIn,
-        slippageBps,
-        minAmountOut: args.minAmountOut,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("verification failed")) throw err;
-      // no v4 pool / quoter issue → try v3
-    }
+    const prefer =
+      args.preferVenue ??
+      normalizeSwapVenue(loadSettings().swapVenue);
+    const { engine, probes, pick } = await selectEthStockVenue(client, {
+      tokenIn,
+      tokenOut,
+      amountIn,
+      prefer,
+      fee: args.fee,
+    });
+
+    const prepared =
+      engine === "v4"
+        ? await prepareV4Trade(client, {
+            broker,
+            from,
+            id,
+            tokenIn,
+            tokenOut,
+            amountIn,
+            amountInHuman: args.amountIn,
+            slippageBps,
+            minAmountOut: args.minAmountOut,
+          })
+        : await prepareV3Trade(client, {
+            broker,
+            from,
+            id,
+            tokenIn,
+            tokenOut,
+            amountIn,
+            amountInHuman: args.amountIn,
+            fee: args.fee,
+            slippageBps,
+            minAmountOut: args.minAmountOut,
+          });
+
+    return {
+      ...prepared,
+      venueSelect: {
+        prefer,
+        picked: pick.engine,
+        detail: pick.detail,
+        probes: formatVenueProbes(probes),
+      },
+    };
   }
 
   return prepareV3Trade(client, {

@@ -9,6 +9,7 @@
   "postToX": true,
   "useXSignals": true,
   "researchRails": "auto",
+  "swapVenue": "auto",
   "thesis": "",
   "dryRun": true,
   "minNotionalUsd": 3,

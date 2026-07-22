@@ -113,6 +113,7 @@ type Settings = {
   postToX: boolean;
   useXSignals: boolean;
   researchRails: "auto" | "always" | "off";
+  swapVenue: "auto" | "v3" | "v4";
   thesis: string;
   dryRun: boolean;
   minNotionalUsd: number;
@@ -314,6 +315,8 @@ const SETTING_TIPS = {
     "When yes and X_BEARER_TOKEN is set, fetch cashtag buzz only when Research rails says the pass needs research (not every pass in auto mode).",
   researchRails:
     "auto = skip LLM/X when TP/SL, cash-restore, or near-target hold are obvious from marks; always = every pass; off = never call LLM/X.",
+  swapVenue:
+    "Which Uniswap engine to use for ETH/WETH↔stock. auto = probe v3 and v4 and pick the mark-sane quote (recommended — many names only have real v3 liquidity). v3 / v4 = force that venue when it clears the mark gate.",
   dryRun:
     "ON = prepare and log only, no chain broadcast. OFF = live TBA txs. Toggle also available on the Live tab.",
   llmModel:
@@ -2404,6 +2407,22 @@ export default function HomePage() {
                     <option value="auto">auto (thrifty)</option>
                     <option value="always">always</option>
                     <option value="off">off</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.swapVenue}>Swap venue</TipLabel>
+                  <select
+                    value={settingsDraft.swapVenue ?? "auto"}
+                    onChange={(e) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        swapVenue: e.target.value as "auto" | "v3" | "v4",
+                      })
+                    }
+                  >
+                    <option value="auto">auto (v3 or v4)</option>
+                    <option value="v3">v3 only</option>
+                    <option value="v4">v4 only</option>
                   </select>
                 </div>
                 <div className="field">

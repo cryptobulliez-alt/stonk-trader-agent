@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ManagePolicy } from "../portfolioManage.js";
+import type { SwapVenuePref } from "../swapVenue.js";
+import { normalizeSwapVenue } from "../swapVenue.js";
 import type { ResearchRailsMode } from "./researchGate.js";
 
 export type ShellSettings = {
@@ -22,6 +24,11 @@ export type ShellSettings = {
    * always = call research every pass; off = never call LLM/X.
    */
   researchRails: ResearchRailsMode;
+  /**
+   * auto = probe v3+v4 and pick mark-sane venue; v3/v4 = force that engine when viable.
+   * Not all stock tokens have liquid v4 ETH pools — junk v4 must not win over good v3.
+   */
+  swapVenue: SwapVenuePref;
   thesis: string;
   /** When true, prepare/log only — no broadcast. When false, live txs. */
   dryRun: boolean;
@@ -57,6 +64,7 @@ const DEFAULTS: ShellSettings = {
   postToX: true,
   useXSignals: true,
   researchRails: "auto",
+  swapVenue: "auto",
   thesis: "",
   dryRun: true,
   minNotionalUsd: 3,
@@ -120,6 +128,7 @@ function normalize(s: ShellSettings): ShellSettings {
     postToX: Boolean(s.postToX),
     useXSignals: s.useXSignals === undefined ? true : Boolean(s.useXSignals),
     researchRails: normalizeResearchRails(s.researchRails),
+    swapVenue: normalizeSwapVenue(s.swapVenue),
     thesis: typeof s.thesis === "string" ? s.thesis : "",
     dryRun: s.dryRun === undefined ? true : Boolean(s.dryRun),
     minNotionalUsd: Math.max(1, Number(s.minNotionalUsd) || 3),
