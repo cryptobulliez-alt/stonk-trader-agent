@@ -10,6 +10,7 @@
   "useXSignals": true,
   "researchRails": "auto",
   "swapVenue": "auto",
+  "maxExecVsMarkBps": 1000,
   "thesis": "",
   "dryRun": true,
   "minNotionalUsd": 3,

@@ -60,6 +60,21 @@ export async function executePreparedSteps(
       continue;
     }
 
+    // eth_call first so bad minOut / route reverts don't burn gas after approve
+    try {
+      await session.clients.publicClient.call({
+        to,
+        data,
+        value,
+        account: session.clients.account,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Preflight failed (${what}): ${msg.split("Details:")[0].trim()}`,
+      );
+    }
+
     const hash = await session.clients.walletClient.sendTransaction({
       to,
       data,

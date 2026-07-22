@@ -6,6 +6,7 @@ import { formatUnits, type Address, type PublicClient } from "viem";
 import {
   findTradeRoute,
   quoteTradeRoute,
+  v3RouteFeeBps,
 } from "./brokerReads.js";
 import { WETH } from "./config.js";
 import { checkSwapQuoteVsMark } from "./swapSanity.js";
@@ -48,6 +49,7 @@ async function probeV4(
     buyStock: boolean;
     stock: { symbol: string; address: Address; decimals: number };
     amountIn: bigint;
+    maxUnderBps?: number;
   },
 ): Promise<VenueProbe> {
   const pool = await findBestEthStockPool(client, args.stock.address);
@@ -65,6 +67,8 @@ async function probeV4(
       amountIn: args.amountIn,
       quotedOut: spot,
       engine: "v4",
+      routeFeeBps: Math.round(pool.key.fee / 100),
+      maxUnderBps: args.maxUnderBps,
     });
     if (!sanity.ok) {
       return { ok: false, engine: "v4", reason: sanity.reason };
@@ -95,6 +99,7 @@ async function probeV3(
     stock: { symbol: string; address: Address; decimals: number };
     amountIn: bigint;
     fee?: number;
+    maxUnderBps?: number;
   },
 ): Promise<VenueProbe> {
   const inAddr = v3CashAddress(args.tokenIn.symbol, args.tokenIn.address);
@@ -108,9 +113,15 @@ async function probeV3(
     };
   }
   try {
-    const spot = await quoteTradeRoute(client, route, inAddr, args.amountIn);
+    const spot = await quoteTradeRoute(
+      client,
+      route,
+      inAddr,
+      outAddr,
+      args.amountIn,
+    );
     if (spot === 0n) {
-      return { ok: false, engine: "v3", reason: "v3 spot quote is zero" };
+      return { ok: false, engine: "v3", reason: "v3 QuoterV2 returned 0" };
     }
     const sanity = await checkSwapQuoteVsMark(client, {
       buyStock: args.buyStock,
@@ -118,6 +129,8 @@ async function probeV3(
       amountIn: args.amountIn,
       quotedOut: spot,
       engine: route.kind === "direct" ? "v3" : "v3-multihop",
+      routeFeeBps: v3RouteFeeBps(route),
+      maxUnderBps: args.maxUnderBps,
     });
     if (!sanity.ok) {
       return { ok: false, engine: "v3", reason: sanity.reason };
@@ -155,6 +168,7 @@ export async function selectEthStockVenue(
     amountIn: bigint;
     prefer?: SwapVenuePref;
     fee?: number;
+    maxUnderBps?: number;
   },
 ): Promise<{ engine: "v4" | "v3"; probes: VenueProbe[]; pick: VenueProbeOk }> {
   const prefer = normalizeSwapVenue(args.prefer);
@@ -172,6 +186,7 @@ export async function selectEthStockVenue(
           decimals: stock.decimals,
         },
         amountIn: args.amountIn,
+        maxUnderBps: args.maxUnderBps,
       }),
     );
   }
@@ -197,6 +212,7 @@ export async function selectEthStockVenue(
           },
           amountIn: args.amountIn,
           fee: args.fee,
+          maxUnderBps: args.maxUnderBps,
         }),
       );
     }

@@ -1,6 +1,5 @@
 import {
   encodeFunctionData,
-  encodePacked,
   formatUnits,
   getAddress,
   isAddress,
@@ -11,11 +10,13 @@ import {
 } from "viem";
 import { erc20Abi, tbaAbi } from "./abis.js";
 import {
+  encodeV3Path,
   findTradeRoute,
   getBroker,
   quoteTradeRoute,
   resolveTradeToken,
   unsignedTx,
+  v3RouteFeeBps,
   type UnsignedTx,
 } from "./brokerReads.js";
 import { WETH } from "./config.js";
@@ -33,9 +34,8 @@ import {
   V4,
 } from "./v4.js";
 import {
-  applyMinOutFloors,
   checkSwapQuoteVsMark,
-  markBasedMinOut,
+  minOutFromExecutableQuote,
   MAX_EXEC_VS_MARK_BPS,
 } from "./swapSanity.js";
 import {
@@ -175,15 +175,17 @@ export async function prepareBrokerTrade(
   const inIsCash = ["WETH", "ETH"].includes(tokenIn.symbol);
   const outIsCash = ["WETH", "ETH"].includes(tokenOut.symbol);
   if (inIsCash !== outIsCash) {
+    const settings = loadSettings();
     const prefer =
-      args.preferVenue ??
-      normalizeSwapVenue(loadSettings().swapVenue);
+      args.preferVenue ?? normalizeSwapVenue(settings.swapVenue);
+    const maxUnderBps = settings.maxExecVsMarkBps;
     const { engine, probes, pick } = await selectEthStockVenue(client, {
       tokenIn,
       tokenOut,
       amountIn,
       prefer,
       fee: args.fee,
+      maxUnderBps,
     });
 
     const prepared =
@@ -198,6 +200,7 @@ export async function prepareBrokerTrade(
             amountInHuman: args.amountIn,
             slippageBps,
             minAmountOut: args.minAmountOut,
+            maxUnderBps,
           })
         : await prepareV3Trade(client, {
             broker,
@@ -210,6 +213,7 @@ export async function prepareBrokerTrade(
             fee: args.fee,
             slippageBps,
             minAmountOut: args.minAmountOut,
+            maxUnderBps,
           });
 
     return {
@@ -249,6 +253,7 @@ async function prepareV4Trade(
     amountInHuman: string;
     slippageBps: number;
     minAmountOut?: string;
+    maxUnderBps?: number;
   },
 ): Promise<Record<string, unknown>> {
   const { broker, tokenIn, tokenOut, amountIn, slippageBps } = args;
@@ -305,6 +310,7 @@ async function prepareV4Trade(
     throw new Error("verification failed: v4 quoter returned 0");
   }
 
+  const routeFeeBps = Math.round(pool.key.fee / 100);
   const sanity = await checkSwapQuoteVsMark(client, {
     buyStock,
     stock: {
@@ -315,43 +321,26 @@ async function prepareV4Trade(
     amountIn,
     quotedOut: spot,
     engine: "v4",
+    routeFeeBps,
+    maxUnderBps: args.maxUnderBps,
   });
   if (!sanity.ok) {
     throw new Error(`verification failed: ${sanity.reason}`);
   }
 
-  const markFloor = markBasedMinOut({
-    fairOutHuman: sanity.fairOutHuman,
-    outDecimals: sanity.outDecimals,
-    slippageBps,
-  });
   let minOut: bigint;
   if (args.minAmountOut != null && args.minAmountOut !== "") {
     minOut = parseUnits(args.minAmountOut, buyStock ? stock.decimals : 18);
-    if (minOut < markFloor) {
-      throw new Error(
-        `verification failed: explicit minAmountOut ${args.minAmountOut} below mark floor ${formatUnits(markFloor, sanity.outDecimals)}`,
-      );
-    }
   } else {
-    minOut = applyMinOutFloors({
-      quotedOut: spot,
-      slippageBps,
-      markFloor,
-    });
+    // Executable v4 quoter only — do not raise with slot0 mark (reverts thin books).
+    minOut = minOutFromExecutableQuote({ quotedOut: spot, slippageBps });
   }
   if (minOut <= 0n) {
     throw new Error("verification failed: refused zero amountOutMinimum");
   }
-  // Final hard check: minOut must be within band of fair (never dust vs mark)
-  if (minOut < markFloor) {
-    throw new Error(
-      `verification failed: amountOutMinimum ${formatUnits(minOut, sanity.outDecimals)} < mark floor ${formatUnits(markFloor, sanity.outDecimals)}`,
-    );
-  }
   if (spot < minOut) {
     throw new Error(
-      `verification failed: v4 quote ${formatUnits(spot, sanity.outDecimals)} cannot meet minOut ${formatUnits(minOut, sanity.outDecimals)} (mark ${sanity.markSource}) — pool too thin`,
+      `verification failed: v4 quote ${formatUnits(spot, sanity.outDecimals)} cannot meet minOut ${formatUnits(minOut, sanity.outDecimals)}`,
     );
   }
 
@@ -444,7 +433,7 @@ async function prepareV4Trade(
         owner: "from matches ownerOf",
         engine: "UniversalRouter V4_SWAP → PoolManager",
         pool: formatV4Pool(pool),
-        priceFloor: `max(v4 quoter, independent mark) − slip; refuse if >${MAX_EXEC_VS_MARK_BPS / 100}% under mark`,
+        priceFloor: `v4 quoter − slip; refuse prepare if >${(args.maxUnderBps ?? MAX_EXEC_VS_MARK_BPS) / 100}% under mark (wrong-pool dust)`,
         quoteVsMarkBps: sanity.vsMarkBps,
         funding: buyStock
           ? "TBA native ETH (unwrap WETH first if needed); EOA pays gas only"
@@ -504,6 +493,7 @@ async function prepareV3Trade(
     fee?: number;
     slippageBps: number;
     minAmountOut?: string;
+    maxUnderBps?: number;
   },
 ): Promise<Record<string, unknown>> {
   const { broker, tokenIn, tokenOut, amountIn, slippageBps } = args;
@@ -519,18 +509,27 @@ async function prepareV3Trade(
     );
   }
 
-  const route = await findTradeRoute(
-    client,
-    tokenIn.address,
-    tokenOut.address,
-    args.fee,
-  );
+  const v3In =
+    tokenIn.symbol === "ETH" || tokenIn.symbol === "WETH"
+      ? WETH
+      : tokenIn.address;
+  const v3Out =
+    tokenOut.symbol === "ETH" || tokenOut.symbol === "WETH"
+      ? WETH
+      : tokenOut.address;
+  const route = await findTradeRoute(client, v3In, v3Out, args.fee);
   if (!route) {
     throw new Error(
       `verification failed: no liquid Uniswap V3 or v4 route for ${tokenIn.symbol}→${tokenOut.symbol}. Call get_stock_tokens.`,
     );
   }
+  if (tokenIn.symbol === "ETH") {
+    throw new Error(
+      "verification failed: v3 SwapRouter02 needs WETH (not native ETH) — use v4 or wrap first",
+    );
+  }
 
+  const routeFeeBps = v3RouteFeeBps(route);
   let minOut: bigint;
   let spotOut: bigint;
   let sanityNote: Record<string, unknown> = {};
@@ -538,10 +537,10 @@ async function prepareV3Trade(
     minOut = parseUnits(args.minAmountOut, tokenOut.decimals);
     spotOut = minOut;
   } else {
-    spotOut = await quoteTradeRoute(client, route, tokenIn.address, amountIn);
+    spotOut = await quoteTradeRoute(client, route, v3In, v3Out, amountIn);
     if (spotOut === 0n) {
       throw new Error(
-        "verification failed: live spot quote is zero — pass explicit minAmountOut or retry",
+        "verification failed: V3 QuoterV2 returned zero — pass explicit minAmountOut or retry",
       );
     }
 
@@ -559,23 +558,20 @@ async function prepareV3Trade(
         amountIn,
         quotedOut: spotOut,
         engine: route.kind === "direct" ? "v3" : "v3-multihop",
+        routeFeeBps,
+        maxUnderBps: args.maxUnderBps,
       });
       if (!sanity.ok) {
         throw new Error(`verification failed: ${sanity.reason}`);
       }
-      const markFloor = markBasedMinOut({
-        fairOutHuman: sanity.fairOutHuman,
-        outDecimals: sanity.outDecimals,
-        slippageBps,
-      });
-      minOut = applyMinOutFloors({
+      // QuoterV2 executable out − slip only (slot0 mark floors caused USO reverts).
+      minOut = minOutFromExecutableQuote({
         quotedOut: spotOut,
         slippageBps,
-        markFloor,
       });
       if (spotOut < minOut) {
         throw new Error(
-          `verification failed: v3 quote cannot meet mark floor minOut — pool too thin vs ${sanity.markSource}`,
+          `verification failed: v3 QuoterV2 out below minOut after slippage`,
         );
       }
       sanityNote = {
@@ -583,9 +579,14 @@ async function prepareV3Trade(
         markUsd: sanity.markUsd,
         markSource: sanity.markSource,
         quoteVsMarkBps: sanity.vsMarkBps,
+        routeFeeBps,
+        quoteSource: "QuoterV2",
       };
     } else {
-      minOut = (spotOut * BigInt(10_000 - slippageBps)) / 10_000n;
+      minOut = minOutFromExecutableQuote({
+        quotedOut: spotOut,
+        slippageBps,
+      });
     }
   }
   if (minOut <= 0n) {
@@ -614,10 +615,7 @@ async function prepareV3Trade(
     });
     routeNote = `v3 direct pool ${route.pool} fee=${route.fee}`;
   } else {
-    const path = encodePacked(
-      ["address", "uint24", "address", "uint24", "address"],
-      [tokenIn.address, route.feeIn, route.mid, route.feeOut, tokenOut.address],
-    );
+    const path = encodeV3Path(route, v3In, v3Out);
     swapData = encodeFunctionData({
       abi: swapRouterAbi,
       functionName: "exactInput",
@@ -663,8 +661,8 @@ async function prepareV3Trade(
       route: routeNote,
       priceFloor:
         Object.keys(sanityNote).length > 0
-          ? `max(venue quote, independent mark) − slip; refuse if >${MAX_EXEC_VS_MARK_BPS / 100}% under mark`
-          : "amountOutMinimum set from live quote − slippage",
+          ? `QuoterV2 − slip; refuse prepare if >${(args.maxUnderBps ?? MAX_EXEC_VS_MARK_BPS) / 100}% under mark (wrong-pool dust)`
+          : "amountOutMinimum from QuoterV2 − slippage",
     },
   });
 

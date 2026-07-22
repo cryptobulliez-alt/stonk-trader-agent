@@ -114,6 +114,7 @@ type Settings = {
   useXSignals: boolean;
   researchRails: "auto" | "always" | "off";
   swapVenue: "auto" | "v3" | "v4";
+  maxExecVsMarkBps: number;
   thesis: string;
   dryRun: boolean;
   minNotionalUsd: number;
@@ -317,6 +318,8 @@ const SETTING_TIPS = {
     "auto = skip LLM/X when TP/SL, cash-restore, or near-target hold are obvious from marks; always = every pass; off = never call LLM/X.",
   swapVenue:
     "Which Uniswap engine to use for ETH/WETH↔stock. auto = probe v3 and v4 and pick the mark-sane quote (recommended — many names only have real v3 liquidity). v3 / v4 = force that venue when it clears the mark gate.",
+  maxExecVsMarkBps:
+    "Max % (in bps) an executable quote may sit under the independent mark before refuse. Default 1000 = 10%. Allows thin USO/SLV impact; still blocks wrong-pool dust fills. Range 100–5000.",
   dryRun:
     "ON = prepare and log only, no chain broadcast. OFF = live TBA txs. Toggle also available on the Live tab.",
   llmModel:
@@ -2424,6 +2427,23 @@ export default function HomePage() {
                     <option value="v3">v3 only</option>
                     <option value="v4">v4 only</option>
                   </select>
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.maxExecVsMarkBps}>
+                    Max under mark (bps)
+                  </TipLabel>
+                  <SettingsNumber
+                    value={settingsDraft.maxExecVsMarkBps ?? 1000}
+                    min={100}
+                    max={5000}
+                    step={50}
+                    onCommit={(n) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        maxExecVsMarkBps: n ?? 1000,
+                      })
+                    }
+                  />
                 </div>
                 <div className="field">
                   <TipLabel tip={SETTING_TIPS.dryRun}>Dry run</TipLabel>

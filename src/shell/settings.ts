@@ -29,6 +29,11 @@ export type ShellSettings = {
    * Not all stock tokens have liquid v4 ETH pools — junk v4 must not win over good v3.
    */
   swapVenue: SwapVenuePref;
+  /**
+   * Max bps an executable quote may sit under the independent mark before refuse.
+   * Default 1000 (10%) — allows thin USO/SLV impact; still blocks wrong-pool dust.
+   */
+  maxExecVsMarkBps: number;
   thesis: string;
   /** When true, prepare/log only — no broadcast. When false, live txs. */
   dryRun: boolean;
@@ -65,6 +70,7 @@ const DEFAULTS: ShellSettings = {
   useXSignals: true,
   researchRails: "auto",
   swapVenue: "auto",
+  maxExecVsMarkBps: 1_000,
   thesis: "",
   dryRun: true,
   minNotionalUsd: 3,
@@ -129,6 +135,11 @@ function normalize(s: ShellSettings): ShellSettings {
     useXSignals: s.useXSignals === undefined ? true : Boolean(s.useXSignals),
     researchRails: normalizeResearchRails(s.researchRails),
     swapVenue: normalizeSwapVenue(s.swapVenue),
+    maxExecVsMarkBps: clamp(
+      Math.round(Number(s.maxExecVsMarkBps) || 1_000),
+      100,
+      5_000,
+    ),
     thesis: typeof s.thesis === "string" ? s.thesis : "",
     dryRun: s.dryRun === undefined ? true : Boolean(s.dryRun),
     minNotionalUsd: Math.max(1, Number(s.minNotionalUsd) || 3),

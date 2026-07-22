@@ -13,6 +13,8 @@ export const CONTRACTS = {
   stockBooster: "0x038a7f4e4e89448ad74e044337c9ac25c11e726b" as Address,
   ammVault: "0xe302733accf4800146e55fc45b46b4e4ffc032d2" as Address,
   swapRouter02: "0xcaf681a66d020601342297493863e78c959e5cb2" as Address,
+  /** Uniswap V3 QuoterV2 — executable amountOut (fees + impact), not slot0 math. */
+  quoterV2: "0xF34F2b26bAd1A9aA15086b4D788398ed2D595fBA" as Address,
   uniswapV3Factory: "0x1f7d7550B1b028f7571E69A784071F0205FD2EfA" as Address,
   /** Uniswap v4 — used by live TBA trading bots on Robinhood Chain */
   poolManager: "0x8366a39CC670B4001A1121B8F6A443A643e40951" as Address,

@@ -1,9 +1,12 @@
 import {
   createPublicClient,
+  encodePacked,
   formatUnits,
   getAddress,
+  parseAbi,
   zeroAddress,
   type Address,
+  type Hex,
   type PublicClient,
 } from "viem";
 import { erc20Abi, stonkBrokersAbi } from "./abis.js";
@@ -542,21 +545,61 @@ export async function findTradeRoute(
   return null;
 }
 
+const quoterV2Abi = parseAbi([
+  "function quoteExactInput(bytes path, uint256 amountIn) returns (uint256 amountOut, uint160[] sqrtPriceX96AfterList, uint32[] initializedTicksCrossedList, uint256 gasEstimate)",
+]);
+
+/** Uniswap V3 path bytes for SwapRouter02 / QuoterV2. */
+export function encodeV3Path(
+  route: TradeRoute,
+  tokenIn: Address,
+  tokenOut: Address,
+): Hex {
+  if (route.kind === "direct") {
+    return encodePacked(
+      ["address", "uint24", "address"],
+      [tokenIn, route.fee, tokenOut],
+    );
+  }
+  return encodePacked(
+    ["address", "uint24", "address", "uint24", "address"],
+    [tokenIn, route.feeIn, route.mid, route.feeOut, tokenOut],
+  );
+}
+
+/** Sum of V3 fee tiers in bps (fee 3000 = 30 bps). */
+export function v3RouteFeeBps(route: TradeRoute): number {
+  if (route.kind === "direct") return Math.round(route.fee / 100);
+  return Math.round((route.feeIn + route.feeOut) / 100);
+}
+
+/**
+ * Executable amountOut via QuoterV2 (includes fees + impact).
+ * Do not use slot0 for swap sizing — thin pools quote optimistic and revert at minOut.
+ */
 export async function quoteTradeRoute(
   client: PublicClient,
   route: TradeRoute,
   tokenIn: Address,
+  tokenOut: Address,
   amountIn: bigint,
 ): Promise<bigint> {
-  if (route.kind === "direct") {
-    return quoteExactInSpot(client, route.pool, tokenIn, amountIn);
+  const path = encodeV3Path(route, tokenIn, tokenOut);
+  try {
+    const { result } = await client.simulateContract({
+      address: CONTRACTS.quoterV2,
+      abi: quoterV2Abi,
+      functionName: "quoteExactInput",
+      args: [path, amountIn],
+    });
+    return result[0];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`V3 QuoterV2 failed: ${msg}`);
   }
-  const midAmount = await quoteExactInSpot(client, route.poolIn, tokenIn, amountIn);
-  if (midAmount === 0n) return 0n;
-  return quoteExactInSpot(client, route.poolOut, route.mid, midAmount);
 }
 
-/** Rough amountOut from slot0 (spot). Not a TWAP — use with slippage floor. */
+/** Rough amountOut from slot0 (spot). Marks / display only — not for minOut. */
 export async function quoteExactInSpot(
   client: PublicClient,
   pool: Address,
