@@ -1,12 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 import {
   HoldingsChart,
   type HistoryPoint,
 } from "../components/HoldingsChart";
 
 type Tab = "live" | "portfolio" | "log" | "settings";
+
+const TABS: Tab[] = ["live", "portfolio", "log", "settings"];
+
+function tabFromHash(): Tab {
+  if (typeof window === "undefined") return "live";
+  const h = window.location.hash.replace(/^#/, "").toLowerCase();
+  return (TABS as string[]).includes(h) ? (h as Tab) : "live";
+}
 
 type TradeEntry = {
   id: string;
@@ -572,6 +587,47 @@ function mergeEvents(prev: ShellEvent[], incoming: ShellEvent[]): ShellEvent[] {
     .slice(-120);
 }
 
+function LoadingBlock({ label = "Loading…" }: { label?: string }) {
+  return (
+    <div className="loading-block" role="status" aria-live="polite">
+      <div className="loading-bars" aria-hidden>
+        <span />
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+      <span className="loading-label">{label}</span>
+    </div>
+  );
+}
+
+function LoadingInline({ label = "Refreshing" }: { label?: string }) {
+  return (
+    <span className="loading-inline" role="status" aria-live="polite">
+      <span className="loading-bars" aria-hidden>
+        <span />
+        <span />
+        <span />
+        <span />
+      </span>
+      {label}
+    </span>
+  );
+}
+
+function LoadingBars({ className = "" }: { className?: string }) {
+  return (
+    <span className={`loading-bars ${className}`.trim()} aria-hidden>
+      <span />
+      <span />
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>("live");
   const [status, setStatus] = useState<Status | null>(null);
@@ -588,11 +644,25 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const [loadingPortfolio, setLoadingPortfolio] = useState(true);
+  const [loadingTrades, setLoadingTrades] = useState(true);
+  const portfolioInflight = useRef(0);
+  const tradesInflight = useRef(0);
+  const prevTab = useRef<Tab | null>(null);
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [allowModalOpen, setAllowModalOpen] = useState(false);
   const [allowDraft, setAllowDraft] = useState<string[]>([]);
   const [allowFilter, setAllowFilter] = useState("");
+
+  function goTab(next: Tab) {
+    setTab(next);
+    if (typeof window === "undefined") return;
+    const hash = `#${next}`;
+    if (window.location.hash !== hash) {
+      window.history.replaceState(null, "", hash);
+    }
+  }
 
   async function refreshStatus() {
     const s = await api<{ ok: true } & Status>("/api/status");
@@ -609,10 +679,22 @@ export default function HomePage() {
   }
 
   async function refreshPortfolio() {
-    const p = await api<{ ok: true } & Portfolio>("/api/portfolio");
-    setPortfolio(p);
-    setBroker(p.broker);
-    await refreshHistory(p.broker.tokenId).catch(() => undefined);
+    portfolioInflight.current += 1;
+    setLoadingPortfolio(true);
+    let tokenId: string | undefined;
+    try {
+      const p = await api<{ ok: true } & Portfolio>("/api/portfolio");
+      setPortfolio(p);
+      setBroker(p.broker);
+      tokenId = p.broker.tokenId;
+    } finally {
+      portfolioInflight.current = Math.max(0, portfolioInflight.current - 1);
+      if (portfolioInflight.current === 0) setLoadingPortfolio(false);
+    }
+    // History is secondary — don't keep the refresh indicator waiting on it
+    if (tokenId) {
+      void refreshHistory(tokenId).catch(() => undefined);
+    }
   }
 
   async function refreshHistory(tokenId?: string) {
@@ -626,16 +708,30 @@ export default function HomePage() {
     setHistory({ series: res.series, points: res.points });
   }
 
-  async function refreshTrades(tokenId?: string) {
-    const id = tokenId ?? status?.env.tokenId ?? undefined;
-    const q = id ? `?tokenId=${encodeURIComponent(id)}` : "";
-    const res = await api<{
-      ok: true;
-      trades: TradeEntry[];
-      totals: TradeTotals;
-    }>(`/api/trades${q}`);
-    setTrades(res.trades);
-    setTradeTotals(res.totals);
+  async function refreshTrades(
+    tokenId?: string,
+    opts?: { quiet?: boolean },
+  ) {
+    if (!opts?.quiet) {
+      tradesInflight.current += 1;
+      setLoadingTrades(true);
+    }
+    try {
+      const id = tokenId ?? status?.env.tokenId ?? undefined;
+      const q = id ? `?tokenId=${encodeURIComponent(id)}` : "";
+      const res = await api<{
+        ok: true;
+        trades: TradeEntry[];
+        totals: TradeTotals;
+      }>(`/api/trades${q}`);
+      setTrades(res.trades);
+      setTradeTotals(res.totals);
+    } finally {
+      if (!opts?.quiet) {
+        tradesInflight.current = Math.max(0, tradesInflight.current - 1);
+        if (tradesInflight.current === 0) setLoadingTrades(false);
+      }
+    }
   }
 
   async function loadAssets() {
@@ -644,6 +740,7 @@ export default function HomePage() {
   }
 
   useEffect(() => {
+    goTab(tabFromHash());
     void refreshStatus().catch((e: Error) => setError(e.message));
     void refreshBroker()
       .then(() => setError(null))
@@ -653,6 +750,9 @@ export default function HomePage() {
       .catch((e: Error) => setError(e.message));
     void refreshTrades().catch(() => undefined);
     void loadAssets().catch(() => undefined);
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   // Poll status (and events) — faster while autopilot is running
@@ -685,7 +785,11 @@ export default function HomePage() {
     return () => es.close();
   }, [status?.shellUrl]);
 
+  // Refresh tab data on user tab changes only (boot effect handles first load)
   useEffect(() => {
+    const prev = prevTab.current;
+    prevTab.current = tab;
+    if (prev === null || prev === tab) return;
     if (tab === "portfolio") {
       void refreshPortfolio().catch((e: Error) => setError(e.message));
     }
@@ -703,13 +807,16 @@ export default function HomePage() {
       last.type === "agent.dry_run" ||
       last.type === "agent.prepare"
     ) {
-      void refreshTrades().catch(() => undefined);
+      void refreshTrades(undefined, { quiet: true }).catch(() => undefined);
     }
   }, [events]);
 
   const cashPct = portfolio?.analysis.cashPct ?? null;
   const cashUsd = portfolio?.analysis.cashUsd ?? null;
   const bookUsd = portfolio?.analysis.contentsUsd ?? null;
+  const shellBooting =
+    status == null || (portfolio == null && loadingPortfolio);
+  const statsBooting = portfolio == null && loadingPortfolio;
 
   const tba = broker?.tba ?? portfolio?.broker.tba ?? null;
   const owner = broker?.owner ?? portfolio?.broker.owner ?? null;
@@ -790,7 +897,7 @@ export default function HomePage() {
           },
         ]),
       );
-      setTab("live");
+      goTab("live");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -914,8 +1021,12 @@ export default function HomePage() {
                   className="nft-img"
                 />
               ) : (
-                <div className="nft-placeholder">
-                  {broker || portfolio ? "NO IMG" : "…"}
+                <div
+                  className={`nft-placeholder${
+                    !broker && !portfolio ? " loading" : ""
+                  }`}
+                >
+                  {broker || portfolio ? "NO IMG" : "LOADING"}
                 </div>
               )}
             </div>
@@ -954,35 +1065,65 @@ export default function HomePage() {
 
           <div className="stats">
             <div className="stat">
-              <div className="value">
-                {cashUsd != null ? `$${cashUsd.toFixed(2)}` : "—"}
+              <div
+                className={`value${statsBooting && cashUsd == null ? " loading" : ""}`}
+              >
+                {cashUsd != null ? (
+                  `$${cashUsd.toFixed(2)}`
+                ) : statsBooting ? (
+                  <LoadingBars />
+                ) : (
+                  "—"
+                )}
               </div>
               <div className="label">Cash</div>
             </div>
             <div className="stat">
-              <div className="value">
-                {cashPct != null ? `${cashPct.toFixed(0)}%` : "—"}
+              <div
+                className={`value${statsBooting && cashPct == null ? " loading" : ""}`}
+              >
+                {cashPct != null ? (
+                  `${cashPct.toFixed(0)}%`
+                ) : statsBooting ? (
+                  <LoadingBars />
+                ) : (
+                  "—"
+                )}
               </div>
               <div className="label">Cash pct</div>
             </div>
             <div className="stat">
-              <div className="value">
-                {bookUsd != null ? `$${bookUsd.toFixed(2)}` : "—"}
+              <div
+                className={`value${statsBooting && bookUsd == null ? " loading" : ""}`}
+              >
+                {bookUsd != null ? (
+                  `$${bookUsd.toFixed(2)}`
+                ) : statsBooting ? (
+                  <LoadingBars />
+                ) : (
+                  "—"
+                )}
               </div>
               <div className="label">Book</div>
             </div>
             <div className="stat">
-              <div className="value">{status?.agent.state ?? "—"}</div>
+              <div
+                className={`value${
+                  status == null ? " loading" : ""
+                }`}
+              >
+                {status?.agent.state ?? (status == null ? <LoadingBars /> : "—")}
+              </div>
               <div className="label">Agent state</div>
             </div>
           </div>
 
           <div className="tabs">
-            {(["live", "portfolio", "log", "settings"] as Tab[]).map((t) => (
+            {TABS.map((t) => (
               <button
                 key={t}
                 className={`tab ${tab === t ? "active" : ""}`}
-                onClick={() => setTab(t)}
+                onClick={() => goTab(t)}
               >
                 {t}
               </button>
@@ -1057,51 +1198,77 @@ export default function HomePage() {
 
           {tab === "live" && (
             <div className="panel">
-              <h2>Live feed</h2>
-              {status?.agent.lastThesis && (
-                <p className="sub" style={{ marginBottom: 12 }}>
-                  Thesis: {status.agent.lastThesis}
-                </p>
-              )}
-              <div className="log">
-                {events.length === 0 && (
-                  <div className="log-line">
-                    <span>—</span>
-                    <span className="msg">
-                      {status?.agent.running
-                        ? "Pass in progress — waiting for first event…"
-                        : "Waiting for events — press RUN or ONCE"}
-                    </span>
-                  </div>
-                )}
-                {[...events].reverse().map((ev) => (
-                  <div
-                    key={ev.id}
-                    className={`log-line ${
-                      ev.type.includes("error")
-                        ? "error"
-                        : ev.type.includes("skip") || ev.type.includes("warn")
-                          ? "warn"
-                          : ev.type === "agent.fee"
-                            ? "ok"
-                            : ""
-                    }`}
-                  >
-                    <span>{new Date(ev.ts).toLocaleTimeString()}</span>
-                    <span className="msg">
-                      [{ev.type}] {linkify(ev.message)}
-                    </span>
-                  </div>
-                ))}
+              <div className="panel-head">
+                <h2>Live feed</h2>
+                {shellBooting ? <LoadingInline label="Loading" /> : null}
               </div>
+              {shellBooting ? (
+                <>
+                  <div className="loading-strip" aria-hidden />
+                  <LoadingBlock label="Loading shell" />
+                </>
+              ) : (
+                <>
+                  {status?.agent.lastThesis && (
+                    <p className="sub" style={{ marginBottom: 12 }}>
+                      Thesis: {status.agent.lastThesis}
+                    </p>
+                  )}
+                  <div className="log">
+                    {events.length === 0 && (
+                      <div className="log-line">
+                        <span>—</span>
+                        <span className="msg">
+                          {status?.agent.running
+                            ? "Pass in progress — waiting for first event…"
+                            : "Waiting for events — press RUN or ONCE"}
+                        </span>
+                      </div>
+                    )}
+                    {[...events].reverse().map((ev) => (
+                      <div
+                        key={ev.id}
+                        className={`log-line ${
+                          ev.type.includes("error")
+                            ? "error"
+                            : ev.type.includes("skip") ||
+                                ev.type.includes("warn")
+                              ? "warn"
+                              : ev.type === "agent.fee"
+                                ? "ok"
+                                : ""
+                        }`}
+                      >
+                        <span>{new Date(ev.ts).toLocaleTimeString()}</span>
+                        <span className="msg">
+                          [{ev.type}] {linkify(ev.message)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
           {tab === "portfolio" && (
             <div className="panel">
-              <h2>Portfolio</h2>
-              {portfolio ? (
+              <div className="panel-head">
+                <h2>Portfolio</h2>
+                {portfolio && loadingPortfolio ? (
+                  <LoadingInline />
+                ) : null}
+              </div>
+              {loadingPortfolio && !portfolio ? (
                 <>
+                  <div className="loading-strip" aria-hidden />
+                  <LoadingBlock label="Loading portfolio" />
+                </>
+              ) : portfolio ? (
+                <>
+                  {loadingPortfolio ? (
+                    <div className="loading-strip" aria-hidden />
+                  ) : null}
                   {(() => {
                     const pnl = portfolioPnlSummary(portfolio, history.points);
                     const pCls = pnlClass(pnl.periodPnl);
@@ -1246,14 +1413,19 @@ export default function HomePage() {
                   </div>
                 </>
               ) : (
-                <p className="sub">Loading portfolio…</p>
+                <p className="sub">No portfolio data yet.</p>
               )}
             </div>
           )}
 
           {tab === "log" && (
             <div className="panel">
-              <h2>Swap log</h2>
+              <div className="panel-head">
+                <h2>Swap log</h2>
+                {loadingTrades && trades.length > 0 ? (
+                  <LoadingInline />
+                ) : null}
+              </div>
               <p className="sub" style={{ marginBottom: 12 }}>
                 Owner→TBA executeCalls
                 {tba ? (
@@ -1273,7 +1445,16 @@ export default function HomePage() {
                 <strong>Value</strong> is native ETH attached to the call
                 (often the swap path — still in the TBA, not burned).
               </p>
-              {tradeTotals && (
+              {loadingTrades && trades.length === 0 ? (
+                <>
+                  <div className="loading-strip" aria-hidden />
+                  <LoadingBlock label="Loading swap log" />
+                </>
+              ) : null}
+              {loadingTrades && trades.length > 0 ? (
+                <div className="loading-strip" aria-hidden />
+              ) : null}
+              {tradeTotals && !(loadingTrades && trades.length === 0) && (
                 <div className="stats pnl-stats" style={{ marginBottom: 18 }}>
                   <div className="stat">
                     <div className="value">
@@ -1321,7 +1502,7 @@ export default function HomePage() {
                   </div>
                 </div>
               )}
-              {trades.length === 0 ? (
+              {loadingTrades && trades.length === 0 ? null : trades.length === 0 ? (
                 <p className="sub">
                   No swaps logged yet — run Once / Run (dry or live).
                 </p>
