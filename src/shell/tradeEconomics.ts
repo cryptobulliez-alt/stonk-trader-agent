@@ -94,8 +94,18 @@ export type FeeGateDecision = {
 };
 
 /**
+ * Hard / playbook exits — must not require profitable uPnL (stop-losses are losses).
+ * Matches reasons from portfolioManage core policy.
+ */
+export function isRiskExitReason(reason?: string | null): boolean {
+  if (!reason) return false;
+  return /stop-loss|take-profit|concentration trim/i.test(reason);
+}
+
+/**
  * Decide whether a planned swap clears fee/edge requirements.
- * Cash-restore sells can bypass uPnL edge when cash is critically low.
+ * Cash-restore + risk exits (TP/SL/concentration) bypass discretionary uPnL≥cost.
+ * Thesis trims still need uPnL to cover estimated sell fees.
  */
 export function evaluateFeeGate(args: {
   side: "buy" | "sell";
@@ -112,6 +122,11 @@ export function evaluateFeeGate(args: {
   cashRestore?: boolean;
   /** Cash critically low (reserve − 10pp) — allow sub-min notional sells. */
   cashCritical?: boolean;
+  /**
+   * Stop-loss / take-profit / concentration — allow after minNotional even when
+   * dollar uPnL is negative (otherwise stops can never fire).
+   */
+  riskExit?: boolean;
 }): FeeGateDecision {
   const cost = estimateTradeCostUsd({
     side: args.side,
@@ -180,6 +195,14 @@ export function evaluateFeeGate(args: {
     return {
       ok: true,
       reason: `fee gate ok: cash-restore sell $${args.notionalUsd.toFixed(2)} · est cost $${cost.entryCostUsd.toFixed(2)}`,
+      cost,
+      edgeUsd: uPnl,
+    };
+  }
+  if (args.riskExit) {
+    return {
+      ok: true,
+      reason: `fee gate ok: risk exit $${args.notionalUsd.toFixed(2)} · est cost $${cost.entryCostUsd.toFixed(2)} · uPnL $${uPnl.toFixed(2)}`,
       cost,
       edgeUsd: uPnl,
     };

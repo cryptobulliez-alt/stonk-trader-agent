@@ -87,7 +87,7 @@ X_ACCESS_TOKEN=...
 X_ACCESS_SECRET=...
 ```
 
-Optional for X MCP read tools only:
+Optional for autopilot **X signals** (`useXSignals`) and X MCP read tools:
 
 ```bash
 X_BEARER_TOKEN=...
@@ -184,7 +184,7 @@ npm run portfolio
 | `RH_RPC_URL` | no | Robinhood Chain RPC |
 | `LLM_API_KEY` / `LLM_PROVIDER` / `LLM_MODEL` | no | Pass thesis |
 | `X_API_KEY` / `X_API_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | no | Tweet fills (OAuth 1.0a) |
-| `X_BEARER_TOKEN` | no | X MCP reads |
+| `X_BEARER_TOKEN` | no | Autopilot X signals + X MCP reads |
 | `DRY_RUN` | no | Env default (`true`); dashboard override wins while shell runs |
 | `SLIPPAGE_BPS` | no | Swap slippage |
 | `ZEROX_API_KEY` | no | Optional 0x path |

@@ -2,7 +2,7 @@
 
 **Goal:** keep a cash core at **`reserveWethPct` (default 30%)**, run a **selective** stock sleeve (trend thesis → 1–2 names), take profits / cut losses — aiming for profitable TBA management over time (no guarantees).
 
-**Trading doctrine:** see [`docs/TRADING.md`](docs/TRADING.md) (Investor.gov / CFA / exit-discipline references + agent rules).
+**Trading doctrine:** see [`docs/TRADING.md`](docs/TRADING.md) and runtime skill packs in [`skills/`](skills/README.md) (Investor.gov / CFA / exit-discipline + agent rules).
 
 ## Host model
 
@@ -16,26 +16,26 @@ Default entry: `npm run shell` → dashboard at `http://localhost:3000` + API at
 | --- | --- | --- |
 | A | `robinhood-trading` MCP (optional) | Quotes / research — **not** TBA execution |
 | B | This shell (dashboard / MCP / CLI) | TBA state, selective core, Uniswap prepare/sign, trade tweets |
-| C | X API / X MCP | Social edge + fill posts |
-| Docs | `docs/TRADING.md` | Best-practice rules injected into LLM + human operators |
+| C | X API (`X_*` OAuth + optional `X_BEARER_TOKEN`) | Fill posts + optional cashtag buzz signals (`useXSignals`) |
+| Docs | `docs/TRADING.md` + `skills/*/SKILL.md` | Best-practice rules injected into LLM + human operators |
 
 ## Autopilot loop
 
 Default policy: **`core`** (`reserveWethPct=30`, `deployPct≤15` per pass).
 
 1. Snapshot book + cost basis  
-2. **Thesis** — LLM (if keyed) returns `preferBuys` / `preferSells` / `stance`; else tickers named in Settings thesis notes  
+2. **Signals** — optional X cashtag buzz (`useXSignals`); **Thesis** — LLM loads `skills/*/SKILL.md` agent rules + returns `preferBuys` / `preferSells` / `stance`; else tickers named in Settings thesis notes  
 3. Core actions  
    - Cash below reserve → **sells only**  
-   - Held names → **take-profit / stop-loss** (+ thesis sells)  
-   - Opens → **only** `preferBuys` (≤2), never equal-weight the whole allowlist  
-4. **Fee EV gate** — skip unless notional / edge clears gas+slip  
-5. Prepare (v4; TBA-funded buys) → sign if Dry run OFF → optional X  
+   - Held names → **take-profit / stop-loss** (deeper SL → larger trim) (+ thesis sells)  
+   - Opens → **only** `preferBuys` (≤2), sized by deploy + **risk budget** (`maxRiskPctPerTrade`)  
+4. **Fee EV gate** — buys need edge/size vs fees; **risk exits (TP/SL/concentration) clear when notional ≥ min** (losers are allowed); thesis trims still need uPnL ≥ sell cost  
+5. Prepare (v4; TBA-funded buys) → sign if Dry run OFF → optional X fill post  
 6. Repeat on `intervalMs`
 
 **Allowlist = candidates**, not a must-buy list. Empty `preferBuys` → hold is correct.
 
-Fee defaults: `minNotionalUsd=3`, `minEdgeBps=10`, `takeProfitPct=3`, `stopLossPct=2.5`, `addOnlyDipBps=50`, `maxActionsPerPass=3`, `maxNotionalEth=0.05`.
+Fee defaults: `minNotionalUsd=3`, `minEdgeBps=10`, `takeProfitPct=3`, `stopLossPct=2.5`, `maxRiskPctPerTrade=1.5`, `addOnlyDipBps=50`, `maxActionsPerPass=3`, `maxNotionalEth=0.05`.
 
 ## Policies
 

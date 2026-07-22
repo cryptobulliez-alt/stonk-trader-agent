@@ -7,6 +7,7 @@
   "maxNotionalEth": 0.05,
   "maxActionsPerPass": 3,
   "postToX": true,
+  "useXSignals": true,
   "thesis": "",
   "dryRun": true,
   "minNotionalUsd": 3,
@@ -14,5 +15,6 @@
   "takeProfitPct": 3,
   "stopLossPct": 2.5,
   "addOnlyDipBps": 50,
+  "maxRiskPctPerTrade": 1.5,
   "llmModel": ""
 }

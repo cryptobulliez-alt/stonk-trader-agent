@@ -12,6 +12,11 @@ export type ShellSettings = {
   maxNotionalEth: number;
   maxActionsPerPass: number;
   postToX: boolean;
+  /**
+   * When true and X_BEARER_TOKEN is set, fetch recent cashtag buzz each pass
+   * and bias preferBuys / preferSells (plus LLM context).
+   */
+  useXSignals: boolean;
   thesis: string;
   /** When true, prepare/log only — no broadcast. When false, live txs. */
   dryRun: boolean;
@@ -25,6 +30,11 @@ export type ShellSettings = {
   stopLossPct: number;
   /** Only add to a name when mark is at least this many bps below avg cost. */
   addOnlyDipBps: number;
+  /**
+   * Max % of book at risk if stopLossPct hits on a new open
+   * (position-sizing skill). Caps buy notional.
+   */
+  maxRiskPctPerTrade: number;
   /** Optional gas ETH/step override; else trade-log average. */
   estimateGasEth?: number;
   /** Dashboard override for LLM chat model (else LLM_MODEL / provider default). */
@@ -40,6 +50,7 @@ const DEFAULTS: ShellSettings = {
   maxNotionalEth: 0.05,
   maxActionsPerPass: 3,
   postToX: true,
+  useXSignals: true,
   thesis: "",
   dryRun: true,
   minNotionalUsd: 3,
@@ -47,6 +58,7 @@ const DEFAULTS: ShellSettings = {
   takeProfitPct: 3,
   stopLossPct: 2.5,
   addOnlyDipBps: 50,
+  maxRiskPctPerTrade: 1.5,
 };
 
 function dataDir(): string {
@@ -100,6 +112,7 @@ function normalize(s: ShellSettings): ShellSettings {
     maxNotionalEth: Math.max(0, Number(s.maxNotionalEth) || 0.05),
     maxActionsPerPass: clamp(Number(s.maxActionsPerPass) || 3, 1, 10),
     postToX: Boolean(s.postToX),
+    useXSignals: s.useXSignals === undefined ? true : Boolean(s.useXSignals),
     thesis: typeof s.thesis === "string" ? s.thesis : "",
     dryRun: s.dryRun === undefined ? true : Boolean(s.dryRun),
     minNotionalUsd: Math.max(1, Number(s.minNotionalUsd) || 3),
@@ -107,6 +120,11 @@ function normalize(s: ShellSettings): ShellSettings {
     takeProfitPct: clamp(Math.max(0, Number(s.takeProfitPct) || 3), 0, 100),
     stopLossPct: clamp(Math.max(0, Number(s.stopLossPct) || 2.5), 0, 100),
     addOnlyDipBps: clamp(Number(s.addOnlyDipBps) || 50, 0, 2000),
+    maxRiskPctPerTrade: clamp(
+      Math.max(0.1, Number(s.maxRiskPctPerTrade) || 1.5),
+      0.1,
+      10,
+    ),
     estimateGasEth:
       s.estimateGasEth != null && Number(s.estimateGasEth) > 0
         ? Number(s.estimateGasEth)

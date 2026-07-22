@@ -24,7 +24,9 @@ import {
 } from "./ledger.js";
 import { recordTrade } from "./tradeLog.js";
 import { loadSettings } from "./settings.js";
-import { evaluateEoaGasReserve, evaluateFeeGate } from "./tradeEconomics.js";
+import { evaluateEoaGasReserve, evaluateFeeGate, isRiskExitReason } from "./tradeEconomics.js";
+import { fetchXSignals, mergeXHints } from "./xSignals.js";
+import { loadTradingSkills } from "./skills.js";
 import { getAssetBySymbol } from "../assets.js";
 import { priceTokenUsd } from "../prices.js";
 import { formatEther } from "viem";
@@ -145,6 +147,7 @@ async function runPass(): Promise<void> {
       takeProfitPct: settings.takeProfitPct,
       stopLossPct: settings.stopLossPct,
       addOnlyDipBps: settings.addOnlyDipBps,
+      maxRiskPctPerTrade: settings.maxRiskPctPerTrade,
     });
     const holdings = enrichHoldings(tokenId, preview.holdings);
     const unrealizedPnlPct = Object.fromEntries(
@@ -186,6 +189,15 @@ async function runPass(): Promise<void> {
       },
     );
 
+    const skillIds = loadTradingSkills()
+      .filter((s) => s.inject)
+      .map((s) => s.id);
+    if (skillIds.length) {
+      emitEvent("agent.skills", `Doctrine: ${skillIds.join(", ")}`, {
+        skills: skillIds,
+      });
+    }
+
     const eoaGas = evaluateEoaGasReserve({
       eoaEth,
       ethUsd: preview.ethUsd,
@@ -207,6 +219,34 @@ async function runPass(): Promise<void> {
     let preferBuys: string[] = tickersFromText(settings.thesis, settings.allowlist);
     let preferSells: string[] = [];
 
+    const heldStockSyms = holdings
+      .map((h) => h.symbol.toUpperCase())
+      .filter((s) => !["WETH", "ETH", "USDG", "STONKBROKER"].includes(s));
+
+    let xDigest = await fetchXSignals({
+      bearerToken: settings.useXSignals ? config.xBearerToken : null,
+      symbols: [
+        ...new Set([...settings.allowlist, ...heldStockSyms]),
+      ],
+      heldSymbols: heldStockSyms,
+    });
+    if (settings.useXSignals) {
+      const softSkip =
+        !xDigest.ok &&
+        (xDigest.reason?.includes("X_BEARER") ||
+          xDigest.reason === "no symbols");
+      emitEvent(
+        xDigest.ok || softSkip ? "agent.x" : "agent.warn",
+        xDigest.summary,
+        {
+          preferBuysHint: xDigest.preferBuysHint,
+          preferSellsHint: xDigest.preferSellsHint,
+          source: xDigest.source,
+          reason: xDigest.reason,
+        },
+      );
+    }
+
     if (config.llmApiKey) {
       setAgentState("thinking", "Asking LLM for thesis");
       try {
@@ -227,6 +267,20 @@ async function runPass(): Promise<void> {
           takeProfitPct: settings.takeProfitPct,
           stopLossPct: settings.stopLossPct,
           addOnlyDipBps: settings.addOnlyDipBps,
+          maxRiskPctPerTrade: settings.maxRiskPctPerTrade,
+          xSignals: xDigest.ok
+            ? {
+                summary: xDigest.summary,
+                symbols: xDigest.symbols.map((s) => ({
+                  symbol: s.symbol,
+                  lean: s.lean,
+                  sentiment: s.sentiment,
+                  mentions: s.mentions,
+                })),
+                preferBuysHint: xDigest.preferBuysHint,
+                preferSellsHint: xDigest.preferSellsHint,
+              }
+            : undefined,
         });
         if (plan?.thesis) thesis = plan.thesis;
         if (plan?.preferBuys?.length) {
@@ -251,14 +305,12 @@ async function runPass(): Promise<void> {
           preferBuys.length === 0 &&
           plan?.stance !== "risk_off"
         ) {
-          const held = new Set(
-            holdings
-              .map((h) => h.symbol.toUpperCase())
-              .filter((s) => !["WETH", "ETH", "USDG", "STONKBROKER"].includes(s)),
-          );
+          const held = new Set(heldStockSyms);
           const unheld = settings.allowlist.filter((s) => !held.has(s));
-          if (unheld.length) {
-            preferBuys = [unheld[0]];
+          // Prefer X-bullish unheld when available
+          const xPick = xDigest.preferBuysHint.find((s) => unheld.includes(s));
+          if (xPick || unheld.length) {
+            preferBuys = [xPick ?? unheld[0]];
             emitEvent(
               "agent.plan",
               `fallback deploy: cash +${excess.toFixed(1)}pp over reserve → open ${preferBuys[0]} (unheld allowlist)`,
@@ -287,6 +339,33 @@ async function runPass(): Promise<void> {
       );
     }
 
+    // Soft-merge X buzz hints (sells always; buys when cash has room above reserve)
+    const cashPctForHints = preview.cashPct ?? 0;
+    const cashExcessForHints = cashPctForHints - settings.reserveWethPct;
+    const merged = mergeXHints({
+      preferBuys,
+      preferSells,
+      digest: xDigest,
+      allowlist: settings.allowlist,
+      heldSymbols: heldStockSyms,
+      allowBuyHints: cashExcessForHints >= 5,
+    });
+    if (
+      merged.preferBuys.join() !== preferBuys.join() ||
+      merged.preferSells.join() !== preferSells.join()
+    ) {
+      emitEvent(
+        "agent.plan",
+        `X hints merged · buys=${merged.preferBuys.join(",") || "—"} · sells=${merged.preferSells.join(",") || "—"}`,
+        {
+          before: { preferBuys, preferSells },
+          after: merged,
+        },
+      );
+    }
+    preferBuys = merged.preferBuys;
+    preferSells = merged.preferSells;
+
     setLastThesis(thesis);
     emitEvent("agent.thesis", thesis);
 
@@ -309,6 +388,7 @@ async function runPass(): Promise<void> {
       takeProfitPct: settings.takeProfitPct,
       stopLossPct: settings.stopLossPct,
       addOnlyDipBps: settings.addOnlyDipBps,
+      maxRiskPctPerTrade: settings.maxRiskPctPerTrade,
       maxNamePct: 40,
     });
 
@@ -362,6 +442,18 @@ async function runPass(): Promise<void> {
         side === "sell" && holdingUsd > 0
           ? uPnlTotal * (Math.min(notionalUsd, holdingUsd) / holdingUsd)
           : null;
+      const pnlPct = unrealizedPnlPct[stockSym];
+      const breachedStop =
+        side === "sell" &&
+        pnlPct != null &&
+        pnlPct <= -settings.stopLossPct;
+      const breachedTp =
+        side === "sell" &&
+        pnlPct != null &&
+        pnlPct >= settings.takeProfitPct;
+      const riskExit =
+        side === "sell" &&
+        (isRiskExitReason(a.reason) || breachedStop || breachedTp);
       const gate = evaluateFeeGate({
         side,
         notionalUsd,
@@ -374,6 +466,7 @@ async function runPass(): Promise<void> {
         unrealizedPnlUsd,
         cashRestore: side === "sell" && (cashRestore || /raise cash/i.test(a.reason ?? "")),
         cashCritical: side === "sell" && cashCritical,
+        riskExit,
       });
       const fundedBy =
         typeof item.prepared.fundedBy === "string"

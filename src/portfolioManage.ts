@@ -11,6 +11,10 @@ import { STOCK_TOKENS, WETH } from "./config.js";
 import { CONTRACTS, dividendStockSymbols } from "./contracts.js";
 import { getEthUsd, priceTokenUsd } from "./prices.js";
 import { findBestEthStockPool } from "./v4.js";
+import {
+  riskBudgetBuyCapUsd,
+  stopLossTrimFraction,
+} from "./shell/skills.js";
 
 export type ManagePolicy =
   | "core" // keep ~reserveWethPct WETH; trim stock profits into cash; sleeve the rest across buy universe
@@ -258,6 +262,8 @@ export type ManageOpts = {
   takeProfitPct?: number;
   stopLossPct?: number;
   addOnlyDipBps?: number;
+  /** Max book % at risk if stop hits on a new open (position-sizing skill). */
+  maxRiskPctPerTrade?: number;
 };
 
 export async function analyzeBrokerPortfolio(
@@ -373,6 +379,7 @@ export async function analyzeBrokerPortfolio(
     takeProfitPct: opts.takeProfitPct,
     stopLossPct: opts.stopLossPct,
     addOnlyDipBps: opts.addOnlyDipBps,
+    maxRiskPctPerTrade: opts.maxRiskPctPerTrade,
     preferBuys: opts.preferBuys,
     preferSells: opts.preferSells,
   });
@@ -487,6 +494,7 @@ function buildActions(
     takeProfitPct?: number;
     stopLossPct?: number;
     addOnlyDipBps?: number;
+    maxRiskPctPerTrade?: number;
     preferBuys?: string[];
     preferSells?: string[];
   },
@@ -542,6 +550,7 @@ function buildActions(
         stopLossPct: opts.stopLossPct ?? 2.5,
         addOnlyDipBps: opts.addOnlyDipBps ?? 50,
         maxNamePct: opts.maxNamePct,
+        maxRiskPctPerTrade: opts.maxRiskPctPerTrade ?? 1.5,
         preferBuys: opts.preferBuys,
         preferSells: opts.preferSells,
       }),
@@ -792,6 +801,7 @@ function buildCoreActions(
     stopLossPct: number;
     addOnlyDipBps: number;
     maxNamePct: number;
+    maxRiskPctPerTrade: number;
     preferBuys?: string[];
     preferSells?: string[];
   },
@@ -871,11 +881,12 @@ function buildCoreActions(
     }
     if (pnl <= -opts.stopLossPct) {
       const before = actions.length;
+      const frac = stopLossTrimFraction(pnl, opts.stopLossPct);
       pushSell(
         actions,
         { symbol: h.symbol, amount: h.amount, usd: h.usd },
-        Math.min(h.usd * 0.5, Math.max(minN, h.usd * 0.35)),
-        `Core: stop-loss ${h.symbol} (uPnL ${pnl.toFixed(1)}% ≤ -${opts.stopLossPct}%)${opts.thesisNote}`,
+        Math.min(h.usd * frac, Math.max(minN, h.usd * 0.35)),
+        `Core: stop-loss ${h.symbol} (uPnL ${pnl.toFixed(1)}% ≤ -${opts.stopLossPct}% · trim ~${Math.round(frac * 100)}%)${opts.thesisNote}`,
         1,
         minN,
       );
@@ -996,15 +1007,29 @@ function buildCoreActions(
       }
     }
 
-    const buyUsd = Math.min(budget, perPick, room);
-    if (buyUsd < minN) continue;
+    const buyCap = riskBudgetBuyCapUsd({
+      contentsUsd: opts.contentsUsd,
+      stopLossPct: opts.stopLossPct,
+      maxRiskPctPerTrade: opts.maxRiskPctPerTrade,
+    });
+    const buyUsd = Math.min(budget, perPick, room, buyCap);
+    if (buyUsd < minN) {
+      actions.push({
+        action: "hold",
+        reason: `Core: skip buy ${sym} — risk budget / size $${buyUsd.toFixed(2)} < min $${minN} (maxRisk ${opts.maxRiskPctPerTrade}% @ stop ${opts.stopLossPct}%)`,
+        tokenOut: sym,
+        tradeable: true,
+        priority: 0,
+      });
+      continue;
+    }
     pushBuy(
       actions,
       sym,
       buyUsd,
       opts.ethUsd,
       budget,
-      `Core: selective buy ${sym} (thesis preferBuys · deploy ≤${opts.deployPct}%)${opts.thesisNote}`,
+      `Core: selective buy ${sym} (thesis preferBuys · deploy ≤${opts.deployPct}% · risk≤${opts.maxRiskPctPerTrade}%)${opts.thesisNote}`,
       2,
       minN,
     );

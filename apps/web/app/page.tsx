@@ -111,6 +111,7 @@ type Settings = {
   maxNotionalEth: number;
   maxActionsPerPass: number;
   postToX: boolean;
+  useXSignals: boolean;
   thesis: string;
   dryRun: boolean;
   minNotionalUsd: number;
@@ -118,6 +119,7 @@ type Settings = {
   takeProfitPct: number;
   stopLossPct: number;
   addOnlyDipBps: number;
+  maxRiskPctPerTrade: number;
   estimateGasEth?: number;
   llmModel?: string;
 };
@@ -284,7 +286,9 @@ const SETTING_TIPS = {
   takeProfitPct:
     "Trim a held name when unrealized P&L % is at or above this (bank gains into cash). Max 100.",
   stopLossPct:
-    "Cut/trim a held name when unrealized P&L % is at or below −this (risk off). Max 100.",
+    "Cut/trim a held name when unrealized P&L % is at or below −this. Risk exit — clears the fee gate at min notional even when dollar uPnL is negative.",
+  maxRiskPctPerTrade:
+    "Max % of book at risk if stopLossPct hits on a new open. Caps buy size: book × this / stopLossPct (position-sizing skill).",
   addOnlyDipBps:
     "Only add to an existing position if mark is at least this many bps below avg cost (don’t chase strength into fees).",
   estimateGasEth:
@@ -295,6 +299,8 @@ const SETTING_TIPS = {
     "Operator notes for the LLM (can name tickers). Used as context; tickers mentioned here can seed preferBuys if LLM is off.",
   postToX:
     "When yes, post a templated tweet after dry-run or live fills. Dry run does not block X.",
+  useXSignals:
+    "When yes and X_BEARER_TOKEN is set, each pass fetches recent cashtag buzz for the allowlist/holdings and soft-biases preferBuys/preferSells (also fed to the LLM).",
   dryRun:
     "ON = prepare and log only, no chain broadcast. OFF = live TBA txs. Toggle also available on the Live tab.",
   llmModel:
@@ -2156,6 +2162,23 @@ export default function HomePage() {
                   />
                 </div>
                 <div className="field">
+                  <TipLabel tip={SETTING_TIPS.maxRiskPctPerTrade}>
+                    Max risk % / trade
+                  </TipLabel>
+                  <SettingsNumber
+                    value={settingsDraft.maxRiskPctPerTrade ?? 1.5}
+                    min={0.1}
+                    max={10}
+                    step="0.1"
+                    onCommit={(n) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        maxRiskPctPerTrade: n ?? 1.5,
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
                   <TipLabel tip={SETTING_TIPS.addOnlyDipBps}>
                     Add-only dip bps
                   </TipLabel>
@@ -2230,6 +2253,23 @@ export default function HomePage() {
                       setSettingsDraft({
                         ...settingsDraft,
                         postToX: e.target.value === "yes",
+                      })
+                    }
+                  >
+                    <option value="yes">yes</option>
+                    <option value="no">no</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.useXSignals}>
+                    X signals
+                  </TipLabel>
+                  <select
+                    value={settingsDraft.useXSignals !== false ? "yes" : "no"}
+                    onChange={(e) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        useXSignals: e.target.value === "yes",
                       })
                     }
                   >

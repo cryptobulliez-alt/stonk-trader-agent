@@ -36,8 +36,8 @@ flowchart TD
 ```
 
 1. **Book** — cash %, holdings, avg cost, unrealized P&L, deployable above reserve.  
-2. **Rails** — LLM thesis + `preferBuys` / `preferSells`; optional X / Robinhood research MCP (quotes/sentiment — **never** `place_*` for TBA).  
-3. **Playbook rules** — cash core, position limits, TP/SL, fee EV gate.  
+2. **Rails** — LLM thesis + `preferBuys` / `preferSells`; optional X recent-search buzz (`useXSignals` + `X_BEARER_TOKEN`); optional Robinhood research MCP (quotes — **never** `place_*` for TBA).  
+3. **Playbook rules** — `skills/*/SKILL.md` + cash core, position limits, TP/SL, fee EV gate.  
 4. **Execute** — prepare/sign only if Dry run is OFF.
 
 ## Public references (best-practice anchors)
@@ -85,16 +85,16 @@ Use these as **principles**, adapted to a fee-heavy on-chain sleeve (not day-tra
 
 ### Exits (sells)
 
-8. **Stop-loss** — unrealized P&L % ≤ −`stopLossPct` → fee-gated trim/cut.  
-9. **Take-profit** — unrealized P&L % ≥ `takeProfitPct` → trim toward a smaller sleeve (bank gains into cash).  
-10. **Thesis sells** — `preferSells` / risk-off stance may trim even mid-band when trend thesis breaks (still fee-gated).  
+8. **Stop-loss** — unrealized P&L % ≤ −`stopLossPct` → **risk exit**. Clears fee gate when notional ≥ `minNotionalUsd` even if dollar uPnL is negative (otherwise stops can never fire on losers).  
+9. **Take-profit** — unrealized P&L % ≥ `takeProfitPct` → **risk exit** trim (bank gains into cash); same min-notional rule, not discretionary uPnL≥cost.  
+10. **Thesis sells** — `preferSells` / risk-off / X bearish buzz may trim mid-band (still need uPnL ≥ estimated sell fees unless the name has already breached TP/SL).  
 11. Cash-restore sells may proceed with weak uPnL when cash is critically low (liquidity &gt; purity).
 
 ### Process hygiene
 
 12. Max **`maxActionsPerPass`** — no spray.  
-13. Dry run ON by default; Live feed must show thesis, preferBuys/Sells, fee pass/fail.  
-14. Combine rails: if LLM and settings disagree, **prefer hold** or the more conservative (smaller) action.  
+13. Dry run ON by default; Live feed must show thesis, preferBuys/Sells, fee pass/fail, X buzz when enabled.  
+14. Combine rails: if LLM and settings disagree, **prefer hold** or the more conservative (smaller) action. X hints are soft — they fill empty slots, not override risk_off.  
 15. Log reasons humans can audit (“why this name, why now”).
 
 ## Mapping settings → playbook
@@ -107,9 +107,11 @@ Use these as **principles**, adapted to a fee-heavy on-chain sleeve (not day-tra
 | `minNotionalUsd` / `minEdgeBps` | Fee-aware EV floor |
 | `takeProfitPct` / `stopLossPct` | Exit constraints (CFA-style stop / profit discipline) |
 | `addOnlyDipBps` | Anti-chase on adds |
+| `maxRiskPctPerTrade` | Risk budget on new opens (stop hit ≈ this % of book) |
 | `maxNamePct` | Concentration limit |
 | `maxActionsPerPass` | Heat / churn limit |
 | `thesis` | Operator override notes (may name tickers) |
+| `useXSignals` | When on + `X_BEARER_TOKEN`, recent cashtag buzz biases preferBuys/Sells |
 
 ## Anti-patterns (do not do)
 

@@ -61,6 +61,8 @@ export type AppConfig = {
     accessToken: string;
     accessSecret: string;
   };
+  /** App-only Bearer for recent-search social signals (optional). */
+  xBearerToken?: string;
 };
 
 function loadXCreds() {
@@ -106,6 +108,7 @@ export function loadConfig(): AppConfig {
     llmProvider,
     llmModel: optionalEnv("LLM_MODEL") || undefined,
     x: loadXCreds(),
+    xBearerToken: optionalEnv("X_BEARER_TOKEN") || undefined,
   };
 }
 
@@ -120,11 +123,13 @@ export function loadEnvStatus() {
       process.env.X_ACCESS_TOKEN?.trim() &&
       process.env.X_ACCESS_SECRET?.trim(),
   );
+  const hasXBearer = Boolean(process.env.X_BEARER_TOKEN?.trim());
   return {
     hasPrivateKey,
     hasTokenId,
     hasLlm,
     hasX,
+    hasXBearer,
     dryRun: parseBool(process.env.DRY_RUN, true),
     llmProvider: optionalEnv("LLM_PROVIDER", "openai"),
     tokenId: process.env.STONK_TOKEN_ID?.trim() || null,

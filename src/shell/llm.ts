@@ -6,7 +6,7 @@ import { loadSettings } from "./settings.js";
 
 const SYSTEM = `You are a local StonkBroker TBA portfolio agent on Robinhood Chain.
 
-Follow docs/TRADING.md:
+Follow skills/*/SKILL.md (injected as playbook) and docs/TRADING.md:
 - Allowlist = CANDIDATES. Never buy every name. Prefer 1 (max 2) selective opens.
 - Cash target is ~reserveWethPct (default 30%). Cash well ABOVE that is dry powder that should be put to work — not parked forever.
 - When cashExcessPct >= 10 and unheldAllowlist is non-empty: stance should be "risk_on" and preferBuys MUST include 1 symbol from unheldAllowlist (open a new sleeve name). Only use stance "hold" or empty preferBuys if stance is "risk_off" with a clear risk reason.
@@ -14,6 +14,9 @@ Follow docs/TRADING.md:
 - Adding to an existing name: only if dip vs avg cost or a strong continuation thesis.
 - Never send TBA proceeds to the owner EOA.
 - Cut losers (stop-loss), bank winners (take-profit); respect minNotionalUsd / minEdgeBps.
+- Stop-loss / take-profit are HARD exits — they execute even when dollar uPnL is negative (fee gate still requires minNotional).
+- Optional xSignals (cashtag buzz) may bias preferBuys/preferSells; do not invent tickers outside allowlist.
+- Size opens so a stop hit stays within maxRiskPctPerTrade of book.
 - Output JSON: { thesis, preferBuys, preferSells, stance }.
   - preferBuys: 0–2 allowlist symbols (empty only if risk_off or cash already near target).
   - preferSells: 0–2 held symbols for broken trend (else rely on TP/SL).
@@ -167,7 +170,13 @@ export async function getLlmConnection(config: AppConfig): Promise<LlmConnection
   }
 }
 
+import { skillsSnippet } from "./skills.js";
+
 function playbookSnippet(): string {
+  const fromSkills = skillsSnippet(4500);
+  if (fromSkills.trim()) {
+    return `Trading skills (skills/*/SKILL.md):\n\n${fromSkills}`;
+  }
   const candidates = [
     join(process.cwd(), "docs", "TRADING.md"),
     join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "TRADING.md"),
@@ -213,6 +222,19 @@ export async function askLlmForThesis(
     takeProfitPct?: number;
     stopLossPct?: number;
     addOnlyDipBps?: number;
+    maxRiskPctPerTrade?: number;
+    /** Optional recent X cashtag buzz for allowlist / held names. */
+    xSignals?: {
+      summary: string;
+      symbols: Array<{
+        symbol: string;
+        lean: string;
+        sentiment: number;
+        mentions: number;
+      }>;
+      preferBuysHint?: string[];
+      preferSellsHint?: string[];
+    };
   },
 ): Promise<LlmPlan | null> {
   if (!config.llmApiKey) return null;
@@ -258,8 +280,10 @@ export async function askLlmForThesis(
         takeProfitPct: ctx.takeProfitPct,
         stopLossPct: ctx.stopLossPct,
         addOnlyDipBps: ctx.addOnlyDipBps,
-        hint: "One fee-viable ticket into an unheld name beats spraying. Empty preferBuys only if risk_off or cash near target.",
+        maxRiskPctPerTrade: ctx.maxRiskPctPerTrade,
+        hint: "One fee-viable ticket into an unheld name beats spraying. Empty preferBuys only if risk_off or cash near target. TP/SL are mechanical — still name preferSells when trend breaks mid-band. Cap open size so stop ≈ maxRiskPctPerTrade of book.",
       },
+      xSignals: ctx.xSignals ?? undefined,
     },
     null,
     2,
