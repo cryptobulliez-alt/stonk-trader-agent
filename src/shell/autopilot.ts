@@ -25,6 +25,8 @@ import {
 import { recordTrade } from "./tradeLog.js";
 import { loadSettings } from "./settings.js";
 import { evaluateEoaGasReserve, evaluateFeeGate } from "./tradeEconomics.js";
+import { getAssetBySymbol } from "../assets.js";
+import { priceTokenUsd } from "../prices.js";
 import { formatEther } from "viem";
 import { ownerAccount } from "../config.js";
 
@@ -415,27 +417,81 @@ async function runPass(): Promise<void> {
     for (const h of holdings) {
       marks[h.symbol.toUpperCase()] = h.priceUsd;
     }
+    if (preview.ethUsd != null && preview.ethUsd > 0) {
+      marks.WETH = preview.ethUsd;
+      marks.ETH = preview.ethUsd;
+    }
 
     const hashes: string[] = [];
     const tweetQueue: string[] = [];
 
-    function estimateAmountOut(action: {
-      side?: string;
-      tokenIn?: string;
-      tokenOut?: string;
-      amountIn?: string;
-      notionalUsd?: number;
-    }): string {
-      const notional = action.notionalUsd;
-      if (notional == null || !(notional > 0)) return "~";
-      if (action.side === "sell") {
-        const ethUsd = preview.ethUsd;
-        if (ethUsd != null && ethUsd > 0) return (notional / ethUsd).toPrecision(6);
-        return "~";
+    /** Fill USD marks for symbols we are about to tweet (unheld buys often missing). */
+    async function ensureMarks(symbols: string[]) {
+      for (const raw of symbols) {
+        const sym = raw.toUpperCase();
+        if (!sym || (marks[sym] != null && marks[sym]! > 0)) continue;
+        if (sym === "WETH" || sym === "ETH") {
+          if (preview.ethUsd != null && preview.ethUsd > 0) marks[sym] = preview.ethUsd;
+          continue;
+        }
+        const asset = getAssetBySymbol(sym);
+        if (!asset) continue;
+        try {
+          const p = await priceTokenUsd(
+            client,
+            asset.address,
+            sym,
+            18,
+            preview.ethUsd,
+          );
+          if (p.usd != null && p.usd > 0) marks[sym] = p.usd;
+        } catch {
+          /* leave missing — fall back to quote floor */
+        }
       }
-      const outSym = (action.tokenOut ?? "").toUpperCase();
-      const mark = marks[outSym];
-      if (mark != null && mark > 0) return (notional / mark).toPrecision(6);
+    }
+
+    function amountOutFromPrepared(
+      prepared?: Record<string, unknown>,
+    ): string | null {
+      if (!prepared) return null;
+      const raw = prepared.amountOutMinimum;
+      const n = typeof raw === "string" || typeof raw === "number" ? Number(raw) : NaN;
+      if (!(n > 0)) return null;
+      // amountOutMinimum is spot − slippage; back out approx mid for the tweet
+      const slip = Number(prepared.slippageBps ?? 50);
+      const mid =
+        slip > 0 && slip < 5_000 ? n / (1 - slip / 10_000) : n;
+      return mid.toPrecision(6);
+    }
+
+    function estimateAmountOut(
+      action: {
+        side?: string;
+        tokenIn?: string;
+        tokenOut?: string;
+        amountIn?: string;
+        notionalUsd?: number;
+      },
+      prepared?: Record<string, unknown>,
+    ): string {
+      const notional = action.notionalUsd;
+      if (notional != null && notional > 0) {
+        if (action.side === "sell") {
+          const ethUsd = preview.ethUsd;
+          if (ethUsd != null && ethUsd > 0) {
+            return (notional / ethUsd).toPrecision(6);
+          }
+        } else {
+          const outSym = (action.tokenOut ?? "").toUpperCase();
+          const mark = marks[outSym];
+          if (mark != null && mark > 0) {
+            return (notional / mark).toPrecision(6);
+          }
+        }
+      }
+      const fromQuote = amountOutFromPrepared(prepared);
+      if (fromQuote) return fromQuote;
       return "~";
     }
 
@@ -447,18 +503,32 @@ async function runPass(): Promise<void> {
         amountIn?: string;
         notionalUsd?: number;
       },
-      opts: { dryRun: boolean; txHash?: string },
+      opts: {
+        dryRun: boolean;
+        txHash?: string;
+        prepared?: Record<string, unknown>;
+      },
     ) {
       const text = formatStonkSwapTweet({
         tokenId: session.tokenId,
         fromAmount: action.amountIn ?? "?",
         fromSymbol: action.tokenIn ?? "?",
-        toAmount: estimateAmountOut(action),
+        toAmount: estimateAmountOut(action, opts.prepared),
         toSymbol: action.tokenOut ?? "?",
         txUrl: opts.txHash ? txUrl(opts.txHash as `0x${string}`) : null,
         dryRun: opts.dryRun,
       });
       tweetQueue.push(text);
+    }
+
+    // Price any tokenOut/tokenIn we will tweet that isn't already marked
+    if (settings.postToX && capped.length > 0) {
+      await ensureMarks(
+        capped.flatMap((item) => [
+          item.action.tokenIn ?? "",
+          item.action.tokenOut ?? "",
+        ]),
+      );
     }
 
     if (capped.length === 0) {
@@ -492,7 +562,9 @@ async function runPass(): Promise<void> {
           ethUsd: preview.ethUsd,
           txs: [],
         });
-        if (settings.postToX) enqueueSwapTweet(a, { dryRun: true });
+        if (settings.postToX) {
+          enqueueSwapTweet(a, { dryRun: true, prepared: item.prepared });
+        }
       }
       emitEvent("agent.warn", "Dry run on — turn off Dry run to broadcast");
     } else if (eoaGas.critical) {
@@ -581,6 +653,7 @@ async function runPass(): Promise<void> {
               enqueueSwapTweet(item.action, {
                 dryRun: false,
                 txHash: primaryHash ?? hashes.at(-1),
+                prepared: item.prepared,
               });
             }
           }
