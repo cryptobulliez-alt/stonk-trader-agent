@@ -141,6 +141,12 @@ type Asset = {
   address: string;
   logoUrl: string;
   tradable: boolean;
+  /** From data/venueMap.json — null if not scanned yet. */
+  onChainTradeable?: boolean | null;
+  venue?: string;
+  preferredVenue?: "v3" | "v4" | null;
+  v3?: boolean | null;
+  v4?: boolean | null;
 };
 
 type BrokerInfo = {
@@ -319,7 +325,7 @@ const SETTING_TIPS = {
   swapVenue:
     "Which Uniswap engine to use for ETH/WETH↔stock. auto = probe v3 and v4 and pick the mark-sane quote (recommended — many names only have real v3 liquidity). v3 / v4 = force that venue when it clears the mark gate.",
   maxExecVsMarkBps:
-    "Max % (in bps) an executable quote may sit under the independent mark before refuse. Default 1000 = 10%. Allows thin USO/SLV impact; still blocks wrong-pool dust fills. Range 100–5000.",
+    "Max % (in bps) an executable quote may sit under the independent mark before refuse. Default 2500 = 25%. Allows thin multi-hop books; still blocks wrong-pool dust. Range 100–5000.",
   dryRun:
     "ON = prepare and log only, no chain broadcast. OFF = live TBA txs. Toggle also available on the Live tab.",
   llmModel:
@@ -758,6 +764,7 @@ export default function HomePage() {
   const [allowModalOpen, setAllowModalOpen] = useState(false);
   const [allowDraft, setAllowDraft] = useState<string[]>([]);
   const [allowFilter, setAllowFilter] = useState("");
+  const [allowTradeableOnly, setAllowTradeableOnly] = useState(true);
   const [xAccount, setXAccount] = useState<{
     id: string;
     name: string;
@@ -1072,14 +1079,17 @@ export default function HomePage() {
 
   const filteredAssets = useMemo(() => {
     const q = allowFilter.trim().toUpperCase();
-    if (!q) return assets;
-    return assets.filter(
-      (a) =>
+    return assets.filter((a) => {
+      if (allowTradeableOnly && a.onChainTradeable === false) return false;
+      if (!q) return true;
+      return (
         a.symbol.includes(q) ||
         a.name.toUpperCase().includes(q) ||
-        a.address.toUpperCase().includes(q),
-    );
-  }, [assets, allowFilter]);
+        a.address.toUpperCase().includes(q) ||
+        (a.venue ?? "").toUpperCase().includes(q)
+      );
+    });
+  }, [assets, allowFilter, allowTradeableOnly]);
 
   async function copyText(label: string, text: string) {
     try {
@@ -2433,14 +2443,14 @@ export default function HomePage() {
                     Max under mark (bps)
                   </TipLabel>
                   <SettingsNumber
-                    value={settingsDraft.maxExecVsMarkBps ?? 1000}
+                    value={settingsDraft.maxExecVsMarkBps ?? 2500}
                     min={100}
                     max={5000}
                     step={50}
                     onCommit={(n) =>
                       setSettingsDraft({
                         ...settingsDraft,
-                        maxExecVsMarkBps: n ?? 1000,
+                        maxExecVsMarkBps: n ?? 2500,
                       })
                     }
                   />
@@ -2517,14 +2527,16 @@ export default function HomePage() {
             aria-label="Edit allowlist"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2>Select tokens█</h2>
+            <h2>Select tokens</h2>
             <p className="sub" style={{ margin: 0 }}>
-              Choose stock tokens the autopilot may trade. Confirm to update the
-              draft, then Save settings.
+              Choose stock tokens the autopilot may trade. Venue badges come from{" "}
+              <code>npm run scan:venues</code> (v3 / v4 / both). Confirm to
+              update the draft, then Save settings.
             </p>
             <div className="modal-tools">
               <input
-                placeholder="Filter symbol / name…"
+                type="search"
+                placeholder="Filter symbol / name / venue…"
                 value={allowFilter}
                 onChange={(e) => setAllowFilter(e.target.value)}
                 autoFocus
@@ -2545,14 +2557,23 @@ export default function HomePage() {
               >
                 Clear
               </button>
+              <label className="onchain-toggle">
+                <input
+                  type="checkbox"
+                  checked={allowTradeableOnly}
+                  onChange={(e) => setAllowTradeableOnly(e.target.checked)}
+                />
+                <span>On-chain only</span>
+              </label>
             </div>
             <div className="token-list">
               {filteredAssets.map((a) => {
                 const selected = allowDraft.includes(a.symbol);
+                const venue = a.venue ?? "?";
                 return (
                   <label
                     key={a.symbol}
-                    className={`token-item ${selected ? "selected" : ""}`}
+                    className={`token-item ${selected ? "selected" : ""} ${a.onChainTradeable === false ? "no-venue" : ""}`}
                   >
                     <input
                       type="checkbox"
@@ -2563,7 +2584,9 @@ export default function HomePage() {
                       <strong>{a.symbol}</strong>
                       <div className="name">{a.name}</div>
                     </span>
-                    <span className="name">{shortAddr(a.address)}</span>
+                    <span className="venue-badge" title={a.preferredVenue ? `prefer ${a.preferredVenue}` : venue}>
+                      {venue}
+                    </span>
                   </label>
                 );
               })}

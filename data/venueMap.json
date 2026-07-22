@@ -1,0 +1,1564 @@
+{
+  "scannedAt": "2026-07-22T19:49:28.321Z",
+  "amountInEth": "0.005",
+  "maxExecVsMarkBps": 2500,
+  "total": 96,
+  "tradeable": 73,
+  "v3Only": 48,
+  "v4Only": 17,
+  "both": 8,
+  "none": 23,
+  "tokens": [
+    {
+      "symbol": "AAOI",
+      "address": "0x521Cf887E6531c6F667b5BC4D896E5d9bfE8EB2E",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.077412017715609545"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000375238 AAOI is 100.0% below mark (fair ≈ 0.0782286 from V3 USDG fee=10000 @ $123.0008) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000003752376746475"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "AAPL",
+      "address": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -113,
+        "quotedOut": "0.029583930310280184"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=10000 tick=200",
+        "vsMarkBps": -127,
+        "quotedOut": "0.029543936705371261"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "AMAT",
+      "address": "0x36046893810a7E7fCE501229d57dc3FC8c8716d0",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.016268977818832251"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000204336 AMAT is 100.0% below mark (fair ≈ 0.0164394 from V3 USDG fee=10000 @ $585.3127) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000002043356604737"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "AMD",
+      "address": "0x86923f96303D656E4aa86D9d42D1e57ad2023fdC",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -500,
+        "quotedOut": "0.016218622823945035"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "AMZN",
+      "address": "0x12f190a9F9d7D37a250758b26824B97CE941bF54",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.038907067066711605"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -726,
+        "quotedOut": "0.036463558367711468"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "APLD",
+      "address": "0xb8DBf92F9741c9ac1c32115E78581f23509916FD",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.255992204161340955"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000724007 APLD is 100.0% below mark (fair ≈ 0.258728 from V3 USDG fee=10000 @ $37.2127) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000007240071460318"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "ASML",
+      "address": "0x47F93d52cBeC7C6D2CfC080e154002370a60dAEA",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -103,
+        "quotedOut": "0.005320975530591975"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 7.19746e-8 ASML is 100.0% below mark (fair ≈ 0.00537650 from V3 USDG fee=10000 @ $1790.6353) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000000071974601151"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "ASTS",
+      "address": "0x1AF6446f07eb1d97c546AFC8c9544cBDF3AD5137",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.152931377590149823"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "AVGO",
+      "address": "0x156E175DD063a8cE274C50654eF40e0032b3fbcF",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -1168,
+        "quotedOut": "0.022568391354437776"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.0000103344 AVGO is 100.0% below mark (fair ≈ 0.0255521 from V3 USDG fee=10000 @ $376.7680) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000010334393718309"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "BA",
+      "address": "0x4D21483a44Bf67a86b77E3dA301411880797D452",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.045874314281406782"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "BABA",
+      "address": "0xad25Ac6C84D497db898fa1E8387bf6Af3532a1c4",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "BE",
+      "address": "0x822CC93fFD030293E9842c30BBD678F530701867",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "CBRS",
+      "address": "0x5c90450Bbb4273D7b2f17CF6917AEB237A569679",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.000400074 CBRS is 99.3% below mark (fair ≈ 0.0568227 from V3 USDG fee=10000 @ $169.3796) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.000400074112053781"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "CCL",
+      "address": "0x9651342CeA770aE9a2969Ba2A52611523146aef9",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.360698329026384252"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "CELH",
+      "address": "0x8cF07C5A878945185d327aAa6e33FAa95F95e7bF",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.00270473 CELH is 99.2% below mark (fair ≈ 0.343875 from V3 USDG fee=10000 @ $28.0007) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.002704734493890043"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "CLSK",
+      "address": "0xcBB95BBF36099d34dA091dc6Fa6F49EfA257Cee3",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.618620866699790985"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 2.60707e-7 CLSK is 100.0% below mark (fair ≈ 0.625129 from V3 USDG fee=10000 @ $15.3865) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000000260707263699"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "COIN",
+      "address": "0x6330D8C3178a418788dF01a47479c0ce7CCF450b",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -500,
+        "quotedOut": "0.055574619492943114"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "COST",
+      "address": "0x4EA005168D7F09a7A0Ba9D1DEf21a479950E44C2",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.010288398061070276"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000776355 COST is 99.9% below mark (fair ≈ 0.0103961 from V3 USDG fee=10000 @ $926.0816) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000007763552702626"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "CRCL",
+      "address": "0xdF0992E440dD0be65BD8439b609d6D4366bf1CB5",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=100 tick=1 — v4 quote 0.00000562051 CRCL is 100.0% below mark (fair ≈ 0.131398 from V4 ETH fee=100 × ETH/USD @ $73.2350) — refusing wrong-pool/dust fill (max 20.01% under mark incl. 1bps route fees)",
+        "quotedOut": "0.000005620507037968"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "CRWD",
+      "address": "0xea72Ecca2d0f6bFA1394DBBCff85b52CD4233931",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "CRWV",
+      "address": "0x5f10A1C971B69e47e059e1dC91901B59b3fB49C3",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -645,
+        "quotedOut": "0.113757764264633223"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "DDOG",
+      "address": "0x27c99fBde9D0d2AA4f4Bfb4943f237843DdF6958",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "DELL",
+      "address": "0x941AE714EC6D8130c7B75d67160Ca08f1e7d11Dd",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.000177751 DELL is 99.3% below mark (fair ≈ 0.0240540 from V3 USDG fee=10000 @ $400.2539) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.000177751171993299"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -1141,
+        "quotedOut": "0.021307613964061921"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "ELF",
+      "address": "0x39EC44Bee4F6A116c6F9B8De566848a985C53C60",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.000107267 ELF is 99.9% below mark (fair ≈ 0.148377 from V3 USDG fee=10000 @ $64.8576) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.000107267030290019"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "EWY",
+      "address": "0x7f0aBeF0C07280F82c6a08ead09dEd6BAE2C13Fc",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -105,
+        "quotedOut": "0.051870191598264714"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000240957 EWY is 100.0% below mark (fair ≈ 0.0524155 from V3 USDG fee=10000 @ $183.5114) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000002409569673922"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "F",
+      "address": "0x25C288E6D899b9BC30160965aD9644c67e73bE0C",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.671689935137800556"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.000162462 F is 100.0% below mark (fair ≈ 0.678771 from V3 USDG fee=10000 @ $14.1753) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000162462282116598"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "FLNC",
+      "address": "0x282e87451E10fA6679BC7D76C69BE44cD3fC777C",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.538826290359319018"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.0000248891 FLNC is 100.0% below mark (fair ≈ 0.544467 from V3 USDG fee=10000 @ $17.6835) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000024889135628639"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "FUTU",
+      "address": "0xeB30663bDFf0622Ef4e4E5cBb4E975F19f33f51D",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -1859,
+        "quotedOut": "0.079415097487622878"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "GLW",
+      "address": "0x7c04E6A3368F2A1DE3874f0e80d2e0A1a9915da6",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.046959521380549175"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "GME",
+      "address": "0x1b0E319c6A659F002271B69dB8A7df2F911c153E",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -506,
+        "quotedOut": "0.287998340951354098"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "GOOGL",
+      "address": "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/3000 — v3 quote 0.0172462 GOOGL is 37.5% below mark (fair ≈ 0.0276042 from V3 USDG fee=3000 @ $348.5287) — refusing wrong-pool/dust fill (max 20.31% under mark incl. 31bps route fees)",
+        "quotedOut": "0.017246210495135598"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -668,
+        "quotedOut": "0.025760412263841195"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "INOD",
+      "address": "0xf1953DAB6FaD537488d5A022361FfAa8B4c95eC6",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -105,
+        "quotedOut": "0.143776614174953562"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "INTC",
+      "address": "0xc72b96e0E48ecd4DC75E1e45396e26300BC39681",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -637,
+        "quotedOut": "0.089630136741537724"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "INTU",
+      "address": "0x56d23beE5f41A7120170b0c603Dae30128e460e9",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -1280,
+        "quotedOut": "0.033223825298772204"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "IONQ",
+      "address": "0x558378E000D634A36593E338eBacdd6207640EfE",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.20619857991605628"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.0000100338 IONQ is 100.0% below mark (fair ≈ 0.208360 from V3 USDG fee=10000 @ $46.1840) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.00001003380186807"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "IREN",
+      "address": "0xF0AB0c93bE6F41369d302e55db1A96b3c430212D",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.214638604311230667"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000987795 IREN is 100.0% below mark (fair ≈ 0.216892 from V3 USDG fee=10000 @ $44.3546) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000009877947126435"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "LITE",
+      "address": "0x8eF20885F94e3D9bc7eB3080279188Bd5ED7c08C",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.011382957057510996"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "LLY",
+      "address": "0x8005d266423c7ea827372c9c864491e5786600ea",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.008586026079808172"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "LULU",
+      "address": "0x4e62068525Ab11FE768e29dfD00ef909B9803016",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.00210139 LULU is 97.6% below mark (fair ≈ 0.0881931 from V3 USDG fee=10000 @ $109.0880) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.002101387509057659"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "LUNR",
+      "address": "0xa5D4968421bA94814Be3B136b15cf422101aC1a3",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -103,
+        "quotedOut": "0.56080549425248544"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000317575 LUNR is 100.0% below mark (fair ≈ 0.566657 from V3 USDG fee=10000 @ $16.9843) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000003175750098215"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "MDB",
+      "address": "0xDdf2266b79abf0B48898959B0ed6E6adf512be74",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.032800060159707229"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "META",
+      "address": "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=10000 tick=200",
+        "vsMarkBps": -102,
+        "quotedOut": "0.015302554266050148"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "MRVL",
+      "address": "0x62fd0668e10D8B72339BE2DCF7643001688ff13B",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -204,
+        "quotedOut": "0.045183849997160225"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000373931 MRVL is 100.0% below mark (fair ≈ 0.0461256 from V3 USDG fee=10000 @ $208.6081) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000003739312146872"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "MSFT",
+      "address": "0xe93237C50D904957Cf27E7B1133b510C669c2e74",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/3000 — v3 quote 0.0171677 MSFT is 30.5% below mark (fair ≈ 0.0247120 from V3 USDG fee=3000 @ $389.4053) — refusing wrong-pool/dust fill (max 20.31% under mark incl. 31bps route fees)",
+        "quotedOut": "0.017167685318263797"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=10000 tick=200",
+        "vsMarkBps": -60,
+        "quotedOut": "0.024562056721188587"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "MSTR",
+      "address": "0xec262a75e413fAfD0dF80480274532C79D42da09",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -179,
+        "quotedOut": "0.110151611076847068"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "MU",
+      "address": "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -508,
+        "quotedOut": "0.009044846857214088"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "MXL",
+      "address": "0x48961813349333209994750ffA89b3c5C22eC969",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.104606800061623754"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "NBIS",
+      "address": "0x9D9c6684F596F66a64C030B93A886D51Fd4D7931",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.040779876604107435"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000377177 NBIS is 100.0% below mark (fair ≈ 0.0412070 from V3 USDG fee=10000 @ $233.4897) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000003771770149166"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "NFLX",
+      "address": "0xE0444EF8BF4eD74f74FD73686e2ddF4C1c5591E8",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -558,
+        "quotedOut": "0.129318478969532734"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -343,
+        "quotedOut": "0.132259169550416589"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "NNE",
+      "address": "0xBEF75684C43c4ea7BD18Dd532a2244674Ee8b926",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.497068922498159694"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "NOW",
+      "address": "0x0C3260aF4B8f13a69c4c2dFb84fD667890CDFa14",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.000590032 NOW is 99.5% below mark (fair ≈ 0.107718 from V3 USDG fee=10000 @ $89.3154) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.000590031626513411"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 6.73316e-7 NOW is 100.0% below mark (fair ≈ 0.107719 from V3 USDG fee=10000 @ $89.3154) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000000673316060719"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "NU",
+      "address": "0x408c14038a04f7bD235329E26d2bf569ee20e250",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.00617871 NU is 99.2% below mark (fair ≈ 0.780300 from V3 USDG fee=10000 @ $12.3329) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.00617871374860522"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -1859,
+        "quotedOut": "0.63526272963931679"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "NVDA",
+      "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/500",
+        "vsMarkBps": -25,
+        "quotedOut": "0.04520646906590249"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -550,
+        "quotedOut": "0.042830283802513129"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "NVTS",
+      "address": "0xbE6702d7b70315376dC48a3293f24f0982F86386",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.583379720098892491"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000193130 NVTS is 100.0% below mark (fair ≈ 0.589490 from V3 USDG fee=10000 @ $16.3236) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000001931299640929"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "ORCL",
+      "address": "0xb0992820E760d836549ba69BC7598b4af75dEE03",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -611,
+        "quotedOut": "0.070469266636353464"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "P",
+      "address": "0x1Cdad396DB64BDa184d5182A97Dd9B3C62100b7D",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.132996452372538725"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "PENG",
+      "address": "0x9b23573b156B52565012F5cE02CDF60AFBaa70Be",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.159010742467236481"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "PLTR",
+      "address": "0x894E1EC2D74FFE5AEF8Dc8A9e84686acCB964F2A",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -548,
+        "quotedOut": "0.076069334887863924"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "POET",
+      "address": "0xcf6B2D875361be807EAfa57458c80f28521F9333",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -105,
+        "quotedOut": "1.021395134195604136"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.0000580513 POET is 100.0% below mark (fair ≈ 1.03219 from V3 USDG fee=10000 @ $9.3221) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000058051345490985"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "PR",
+      "address": "0x4189F0c66EBBB0bfeF1C31f763131361EF32f77C",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "QBTS",
+      "address": "0xC583c60aeF9Dc401Da72cEC1B404743a93cea1Cc",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.468596293986997316"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "QCOM",
+      "address": "0x0f17206447090e464C277571124dD2688E48AEA9",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.049864463425053327"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "QQQ",
+      "address": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/3000",
+        "vsMarkBps": -34,
+        "quotedOut": "0.013602591022398445"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000109934 QQQ is 100.0% below mark (fair ≈ 0.0136488 from V3 USDG fee=3000 @ $705.1652) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000001099335320802"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "QUBT",
+      "address": "0x59818904ab4cE163b3cE4FfB64f2D6Ca02c434B4",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "1.106240658517804002"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.0000563853 QUBT is 100.0% below mark (fair ≈ 1.11785 from V3 USDG fee=10000 @ $8.6073) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000056385336577893"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "RBLX",
+      "address": "0xF0C4BF4C582cb3836e98394b1d4e7B7281101bE8",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.112320 RBLX is 47.2% below mark (fair ≈ 0.212837 from V3 USDG fee=10000 @ $45.2375) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.112320494521827654"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "RDDT",
+      "address": "0x05b37Fb53A299a1b874A619e1c4C404D52C36F4C",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "RDW",
+      "address": "0x92Ef19E82bD8fF36661DE838D5eaE7e5CEF0EfFE",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "1.00165006675425955"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000525356 RDW is 100.0% below mark (fair ≈ 1.01217 from V3 USDG fee=10000 @ $9.5112) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000005253560505259"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "RGTI",
+      "address": "0x284358abc07F9359f19f4b5b4aC91901Be2597Ba",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.560666906617378189"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000216099 RGTI is 100.0% below mark (fair ≈ 0.566587 from V3 USDG fee=10000 @ $16.9838) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000002160986663342"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "RIVN",
+      "address": "0xB1BF26c1D20ff267A4f93550d1E0d06ac40a114B",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.00545127 RIVN is 99.2% below mark (fair ≈ 0.678426 from V3 USDG fee=10000 @ $14.1861) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.005451271775425829"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "RKLB",
+      "address": "0x3b14C39E89D60D627b42a1A4CA45b5bb45Fc12e2",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -865,
+        "quotedOut": "0.130586641883923389"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "SATS",
+      "address": "0x95052ddcd5DC25641657424A8Cf04834997E1730",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "SGOV",
+      "address": "0x92FD66527192E3e61d4DDd13322Aa222DE86F9B5",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/3000",
+        "vsMarkBps": -34,
+        "quotedOut": "0.095131066076241949"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "SHOP",
+      "address": "0xF53F66751B1Eff985311b693531E3290F600c410",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.0141908 SHOP is 83.3% below mark (fair ≈ 0.0847607 from V3 USDG fee=10000 @ $113.5285) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.014190760718798591"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "SKHY",
+      "address": "0x84CAb63bc87912E71ad199ff14A0bA45de68FeF8",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "SLV",
+      "address": "0x411eFb0E7f985935DAec3D4C3ebaEa0d0AD7D89f",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -101,
+        "quotedOut": "0.174634188750581177"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.00000845762 SLV is 100.0% below mark (fair ≈ 0.176421 from V3 USDG fee=10000 @ $54.5743) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000008457615283887"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "SMCI",
+      "address": "0xc01aA1fECeC0605b13bc84874ff7256C0f5F562a",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.30860275955039944"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -557,
+        "quotedOut": "0.294475389281034032"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "SNDK",
+      "address": "0xB90A19fF0Af67f7779afF50A882A9CfF42446400",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -531,
+        "quotedOut": "0.005511255392846774"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "SOFI",
+      "address": "0x98E75885157C80992A8D41b696D8c9C6Fb30A926",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -2118,
+        "quotedOut": "0.4471024533195532"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.0000106207 SOFI is 100.0% below mark (fair ≈ 0.567114 from V3 USDG fee=10000 @ $16.9766) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000010620726946238"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "SOXX",
+      "address": "0x75742c18BC1f1C5c5f448f4C9D9C6F66dafAAa38",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.016938025840697511"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "SPCX",
+      "address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/100",
+        "vsMarkBps": 2,
+        "quotedOut": "0.082902643764128255"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=10000 tick=200",
+        "vsMarkBps": -157,
+        "quotedOut": "0.081569446956697822"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "SPMO",
+      "address": "0xAd622320e520de39e72d41EF07438C3Fd3354875",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.063692029163347584"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "SPY",
+      "address": "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/3000 — v3 quote 0.00840586 SPY is 34.8% below mark (fair ≈ 0.0128970 from V3 USDG fee=3000 @ $746.4643) — refusing wrong-pool/dust fill (max 20.31% under mark incl. 31bps route fees)",
+        "quotedOut": "0.008405859180657493"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -883,
+        "quotedOut": "0.011758093537322234"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "TSEM",
+      "address": "0x89776d4Cd68193597A2fC132cfaC1fDe36CCeA8a",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -105,
+        "quotedOut": "0.03798774360948786"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 1.03832e-7 TSEM is 100.0% below mark (fair ≈ 0.0383899 from V3 USDG fee=10000 @ $250.6698) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.00000010383237042"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "TSLA",
+      "address": "0x322F0929c4625eD5bAd873c95208D54E1c003b2d",
+      "v3": {
+        "ok": true,
+        "detail": "direct fee 3000",
+        "vsMarkBps": -47,
+        "quotedOut": "0.025556134379330028"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -869,
+        "quotedOut": "0.023445496767462407"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "TSM",
+      "address": "0x58FfE4a942d3885bAa22D7520691F611EF09e7AA",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -103,
+        "quotedOut": "0.022494846754207513"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -465,
+        "quotedOut": "0.021670716168597821"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "TTWO",
+      "address": "0x5e81213613b6B86EaB4c6c50d718d34359459786",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.00549065 TTWO is 87.0% below mark (fair ≈ 0.0420909 from V3 USDG fee=10000 @ $228.6199) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.005490653150879566"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "UMC",
+      "address": "0x0E6e67Ba88e7b5d9B67636A215c76779B948dE79",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "UPS",
+      "address": "0xf23250dac154D05Bb671CB0d0eBEf3c635c79CE2",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.0214471 UPS is 76.2% below mark (fair ≈ 0.0900081 from V3 USDG fee=10000 @ $106.9157) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.021447091062001817"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "USAR",
+      "address": "0xd917B029C761D264c6A312BBbcDA868658eF86a6",
+      "v3": {
+        "ok": false,
+        "detail": "no v3 WETH/USDG route"
+      },
+      "v4": {
+        "ok": true,
+        "detail": "fee=50000 tick=1000",
+        "vsMarkBps": -536,
+        "quotedOut": "0.545357268846251548"
+      },
+      "tradeable": true,
+      "preferred": "v4"
+    },
+    {
+      "symbol": "USO",
+      "address": "0xa30FA36Db767ad9eD3f7a60fC79526fB4d56D344",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/3000",
+        "vsMarkBps": -309,
+        "quotedOut": "0.070802126034470639"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "WDAY",
+      "address": "0x82DA4646242e1D962e96e932269Dc644c94a9CaA",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.083967491106366933"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "XLK",
+      "address": "0x15Cd20759CE7F3285c29A319dE2D1A2e098c6f43",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.053131824439505755"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "XNDU",
+      "address": "0xA8eB3BCcbf2017eE7CBfb652eB51CF2E1B153289",
+      "v3": {
+        "ok": true,
+        "detail": "via USDG 100/10000",
+        "vsMarkBps": -104,
+        "quotedOut": "0.866107176489733443"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": true,
+      "preferred": "v3"
+    },
+    {
+      "symbol": "XOM",
+      "address": "0xf9B46d3D1B22199D4D1025a9cEDB540A33F1a2d5",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.00817443 XOM is 88.7% below mark (fair ≈ 0.0722071 from V3 USDG fee=10000 @ $133.2327) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.008174432182509222"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "fee=10000 tick=200 — v4 quote 0.0000387807 XOM is 100.0% below mark (fair ≈ 0.0722074 from V3 USDG fee=10000 @ $133.2327) — refusing wrong-pool/dust fill (max 21% under mark incl. 100bps route fees)",
+        "quotedOut": "0.000038780748664078"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "ZM",
+      "address": "0x44c4F142009036cF477eD2d09932051843137CF1",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.000833716 ZM is 99.3% below mark (fair ≈ 0.119123 from V3 USDG fee=10000 @ $80.8163) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.000833715585478331"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    },
+    {
+      "symbol": "ZS",
+      "address": "0x7dc013eB55e436f30d7ED1AFE4E36d6e45e3c3f7",
+      "v3": {
+        "ok": false,
+        "detail": "via USDG 100/10000 — v3 quote 0.0300539 ZS is 62.4% below mark (fair ≈ 0.0798224 from V3 USDG fee=10000 @ $120.5374) — refusing wrong-pool/dust fill (max 21.01% under mark incl. 101bps route fees)",
+        "quotedOut": "0.030053874693852783"
+      },
+      "v4": {
+        "ok": false,
+        "detail": "no v4 ETH pool"
+      },
+      "tradeable": false,
+      "preferred": null
+    }
+  ]
+}

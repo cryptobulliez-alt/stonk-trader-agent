@@ -10,7 +10,7 @@ import { getEthUsd, priceTokenUsd } from "./prices.js";
  * Thin ETF multi-hops (USO/SLV) often print 2–6% under slot0 marks after fees/impact —
  * that is tradeable. Wrong-pool dust is orders of magnitude worse.
  */
-export const MAX_EXEC_VS_MARK_BPS = 1_000; // 10%
+export const MAX_EXEC_VS_MARK_BPS = 2_500; // 25% — thin multi-hops (SOFI/USO); still blocks dust
 
 export type SwapSanityOk = {
   ok: true;

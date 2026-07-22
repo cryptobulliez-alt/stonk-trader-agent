@@ -3,11 +3,7 @@
  * Many names only have a real V3 book; some have thin/junk V4 pools that still "exist".
  */
 import { formatUnits, type Address, type PublicClient } from "viem";
-import {
-  findTradeRoute,
-  quoteTradeRoute,
-  v3RouteFeeBps,
-} from "./brokerReads.js";
+import { findBestQuotedRoute, v3RouteFeeBps } from "./brokerReads.js";
 import { WETH } from "./config.js";
 import { checkSwapQuoteVsMark } from "./swapSanity.js";
 import { findBestEthStockPool, quoteV4ExactIn } from "./v4.js";
@@ -104,25 +100,22 @@ async function probeV3(
 ): Promise<VenueProbe> {
   const inAddr = v3CashAddress(args.tokenIn.symbol, args.tokenIn.address);
   const outAddr = v3CashAddress(args.tokenOut.symbol, args.tokenOut.address);
-  const route = await findTradeRoute(client, inAddr, outAddr, args.fee);
-  if (!route) {
-    return {
-      ok: false,
-      engine: "v3",
-      reason: `no liquid v3 WETH/USDG route for ${args.tokenIn.symbol}→${args.tokenOut.symbol}`,
-    };
-  }
   try {
-    const spot = await quoteTradeRoute(
+    const quoted = await findBestQuotedRoute(
       client,
-      route,
       inAddr,
       outAddr,
       args.amountIn,
+      args.fee,
     );
-    if (spot === 0n) {
-      return { ok: false, engine: "v3", reason: "v3 QuoterV2 returned 0" };
+    if (!quoted || quoted.quotedOut === 0n) {
+      return {
+        ok: false,
+        engine: "v3",
+        reason: `no liquid v3 WETH/USDG route for ${args.tokenIn.symbol}→${args.tokenOut.symbol}`,
+      };
     }
+    const { route, quotedOut: spot } = quoted;
     const sanity = await checkSwapQuoteVsMark(client, {
       buyStock: args.buyStock,
       stock: args.stock,

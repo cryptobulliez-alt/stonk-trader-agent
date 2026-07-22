@@ -462,18 +462,16 @@ export async function getActivationMath(
   };
 }
 
-export async function findBestPool(
+export type LivePool = { pool: Address; fee: number; liquidity: bigint };
+
+/** All non-empty V3 pools for a pair (every fee tier). */
+export async function listLivePools(
   client: PublicClient,
   tokenA: Address,
   tokenB: Address,
-  preferredFee?: number,
-): Promise<{ pool: Address; fee: number } | null> {
-  const fees = preferredFee
-    ? [preferredFee, ...FEE_TIERS.filter((f) => f !== preferredFee)]
-    : [...FEE_TIERS];
-
-  let best: { pool: Address; fee: number; liquidity: bigint } | null = null;
-  for (const fee of fees) {
+): Promise<LivePool[]> {
+  const out: LivePool[] = [];
+  for (const fee of FEE_TIERS) {
     const pool = await client.readContract({
       address: CONTRACTS.uniswapV3Factory,
       abi: factoryAbi,
@@ -486,13 +484,26 @@ export async function findBestPool(
       abi: poolAbi,
       functionName: "liquidity",
     });
-    // Skip empty pools — slot0 can still quote a price with liquidity=0, but swaps revert.
     if (liquidity === 0n) continue;
-    if (!best || liquidity > best.liquidity) {
-      best = { pool: getAddress(pool), fee, liquidity };
-    }
+    out.push({ pool: getAddress(pool), fee, liquidity });
   }
-  return best ? { pool: best.pool, fee: best.fee } : null;
+  return out;
+}
+
+export async function findBestPool(
+  client: PublicClient,
+  tokenA: Address,
+  tokenB: Address,
+  preferredFee?: number,
+): Promise<{ pool: Address; fee: number } | null> {
+  const pools = await listLivePools(client, tokenA, tokenB);
+  if (!pools.length) return null;
+  if (preferredFee != null) {
+    const pref = pools.find((p) => p.fee === preferredFee);
+    if (pref) return { pool: pref.pool, fee: pref.fee };
+  }
+  pools.sort((a, b) => (a.liquidity > b.liquidity ? -1 : 1));
+  return { pool: pools[0].pool, fee: pools[0].fee };
 }
 
 export type TradeRoute =
@@ -507,7 +518,48 @@ export type TradeRoute =
       poolOut: Address;
     };
 
-/** Direct liquid pool, else multi-hop via USDG (AAPL) or WETH. */
+/** Enumerate direct + multi-hop (USDG/WETH) candidates across fee tiers. */
+export async function listTradeRouteCandidates(
+  client: PublicClient,
+  tokenIn: Address,
+  tokenOut: Address,
+): Promise<TradeRoute[]> {
+  const candidates: TradeRoute[] = [];
+  for (const p of await listLivePools(client, tokenIn, tokenOut)) {
+    candidates.push({ kind: "direct", pool: p.pool, fee: p.fee });
+  }
+
+  const mids: Array<{ address: Address; symbol: string }> = [
+    { address: USDG, symbol: "USDG" },
+    { address: WETH, symbol: "WETH" },
+  ];
+  for (const mid of mids) {
+    if (
+      tokenIn.toLowerCase() === mid.address.toLowerCase() ||
+      tokenOut.toLowerCase() === mid.address.toLowerCase()
+    ) {
+      continue;
+    }
+    const legsIn = await listLivePools(client, tokenIn, mid.address);
+    const legsOut = await listLivePools(client, mid.address, tokenOut);
+    for (const a of legsIn) {
+      for (const b of legsOut) {
+        candidates.push({
+          kind: "multi",
+          mid: mid.address,
+          midSymbol: mid.symbol,
+          feeIn: a.fee,
+          feeOut: b.fee,
+          poolIn: a.pool,
+          poolOut: b.pool,
+        });
+      }
+    }
+  }
+  return candidates;
+}
+
+/** Direct liquid pool, else multi-hop via USDG or WETH (max liquidity per leg). */
 export async function findTradeRoute(
   client: PublicClient,
   tokenIn: Address,
@@ -597,6 +649,48 @@ export async function quoteTradeRoute(
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`V3 QuoterV2 failed: ${msg}`);
   }
+}
+
+/**
+ * Pick the V3 route with the best QuoterV2 amountOut for this size.
+ * Highest-liquidity fee tier is often wrong for thin stock tokens — quote all.
+ */
+export async function findBestQuotedRoute(
+  client: PublicClient,
+  tokenIn: Address,
+  tokenOut: Address,
+  amountIn: bigint,
+  preferredFee?: number,
+): Promise<{ route: TradeRoute; quotedOut: bigint } | null> {
+  const candidates = await listTradeRouteCandidates(client, tokenIn, tokenOut);
+  if (!candidates.length) return null;
+
+  let best: { route: TradeRoute; quotedOut: bigint } | null = null;
+  for (const route of candidates) {
+    try {
+      const quotedOut = await quoteTradeRoute(
+        client,
+        route,
+        tokenIn,
+        tokenOut,
+        amountIn,
+      );
+      if (quotedOut === 0n) continue;
+      if (
+        !best ||
+        quotedOut > best.quotedOut ||
+        (quotedOut === best.quotedOut &&
+          preferredFee != null &&
+          route.kind === "direct" &&
+          route.fee === preferredFee)
+      ) {
+        best = { route, quotedOut };
+      }
+    } catch {
+      // quoter revert on that path
+    }
+  }
+  return best;
 }
 
 /** Rough amountOut from slot0 (spot). Marks / display only — not for minOut. */

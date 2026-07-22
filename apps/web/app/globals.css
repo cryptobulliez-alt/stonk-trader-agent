@@ -337,11 +337,13 @@ button {
 .modal-tools {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin: 10px 0;
 }
 
-.modal-tools input {
+.modal-tools input[type="search"],
+.modal-tools input[type="text"] {
   flex: 1;
   min-width: 140px;
   background: #000;
@@ -349,6 +351,27 @@ button {
   color: var(--text);
   padding: 8px 10px;
   font: inherit;
+}
+
+.modal-tools .onchain-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.modal-tools .onchain-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--accent);
 }
 
 .token-list {
@@ -378,6 +401,10 @@ button {
   color: var(--accent);
 }
 
+.token-item.no-venue {
+  opacity: 0.55;
+}
+
 .token-item input {
   accent-color: var(--accent);
 }
@@ -389,6 +416,22 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 220px;
+}
+
+.token-item .venue-badge {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--border-subtle);
+  padding: 2px 6px;
+  min-width: 3.5rem;
+  text-align: center;
+}
+
+.token-item.selected .venue-badge {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .modal-foot {

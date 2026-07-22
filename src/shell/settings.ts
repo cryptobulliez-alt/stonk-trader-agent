@@ -31,7 +31,7 @@ export type ShellSettings = {
   swapVenue: SwapVenuePref;
   /**
    * Max bps an executable quote may sit under the independent mark before refuse.
-   * Default 1000 (10%) — allows thin USO/SLV impact; still blocks wrong-pool dust.
+   * Default 2500 (25%) — thin multi-hop books (USO/SLV/SOFI); still blocks dust.
    */
   maxExecVsMarkBps: number;
   thesis: string;
@@ -70,7 +70,7 @@ const DEFAULTS: ShellSettings = {
   useXSignals: true,
   researchRails: "auto",
   swapVenue: "auto",
-  maxExecVsMarkBps: 1_000,
+  maxExecVsMarkBps: 2_500,
   thesis: "",
   dryRun: true,
   minNotionalUsd: 3,
@@ -136,7 +136,7 @@ function normalize(s: ShellSettings): ShellSettings {
     researchRails: normalizeResearchRails(s.researchRails),
     swapVenue: normalizeSwapVenue(s.swapVenue),
     maxExecVsMarkBps: clamp(
-      Math.round(Number(s.maxExecVsMarkBps) || 1_000),
+      Math.round(Number(s.maxExecVsMarkBps) || 2_500),
       100,
       5_000,
     ),

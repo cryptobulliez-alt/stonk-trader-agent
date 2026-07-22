@@ -21,7 +21,8 @@
     "shell": "node scripts/shell.mjs",
     "web": "npm run dev --prefix apps/web",
     "web:install": "npm install --prefix apps/web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "scan:venues": "tsx scripts/scan-venues.ts"
   },
   "engines": {
     "node": ">=20"

@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { formatEther } from "viem";
 import { stonkBrokersAbi } from "../abis.js";
 import { listStockAssets } from "../assets.js";
+import { getVenueForSymbol, loadVenueMap, venueBadge } from "../venueMap.js";
 import { makePublicClient } from "../brokerReads.js";
 import { getXAccount, postTextToX, type XAccountInfo } from "../twitter.js";
 import { formatStonkSwapTweet } from "../swap.js";
@@ -346,16 +347,37 @@ async function handle(
     }
 
     if (method === "GET" && path === "/api/assets") {
+      const venueMap = loadVenueMap();
       json(res, 200, {
         ok: true,
         count: listStockAssets().length,
-        assets: listStockAssets().map((a) => ({
-          symbol: a.symbol,
-          name: a.name,
-          address: a.address,
-          logoUrl: a.logoUrl,
-          tradable: a.tradable,
-        })),
+        venueMap: venueMap
+          ? {
+              scannedAt: venueMap.scannedAt,
+              tradeable: venueMap.tradeable,
+              total: venueMap.total,
+              v3Only: venueMap.v3Only,
+              v4Only: venueMap.v4Only,
+              both: venueMap.both,
+              none: venueMap.none,
+            }
+          : null,
+        assets: listStockAssets().map((a) => {
+          const venue = getVenueForSymbol(a.symbol);
+          const badge = venueBadge(venue);
+          return {
+            symbol: a.symbol,
+            name: a.name,
+            address: a.address,
+            logoUrl: a.logoUrl,
+            tradable: a.tradable,
+            onChainTradeable: badge.tradeableOnChain,
+            venue: badge.label,
+            preferredVenue: venue?.preferred ?? null,
+            v3: venue?.v3?.ok ?? null,
+            v4: venue?.v4?.ok ?? null,
+          };
+        }),
       });
       return;
     }

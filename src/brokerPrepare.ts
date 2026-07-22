@@ -11,9 +11,8 @@ import {
 import { erc20Abi, tbaAbi } from "./abis.js";
 import {
   encodeV3Path,
-  findTradeRoute,
+  findBestQuotedRoute,
   getBroker,
-  quoteTradeRoute,
   resolveTradeToken,
   unsignedTx,
   v3RouteFeeBps,
@@ -517,18 +516,25 @@ async function prepareV3Trade(
     tokenOut.symbol === "ETH" || tokenOut.symbol === "WETH"
       ? WETH
       : tokenOut.address;
-  const route = await findTradeRoute(client, v3In, v3Out, args.fee);
-  if (!route) {
-    throw new Error(
-      `verification failed: no liquid Uniswap V3 or v4 route for ${tokenIn.symbol}→${tokenOut.symbol}. Call get_stock_tokens.`,
-    );
-  }
   if (tokenIn.symbol === "ETH") {
     throw new Error(
       "verification failed: v3 SwapRouter02 needs WETH (not native ETH) — use v4 or wrap first",
     );
   }
 
+  const quoted = await findBestQuotedRoute(
+    client,
+    v3In,
+    v3Out,
+    amountIn,
+    args.fee,
+  );
+  if (!quoted) {
+    throw new Error(
+      `verification failed: no liquid Uniswap V3 route for ${tokenIn.symbol}→${tokenOut.symbol}. Call get_stock_tokens / scan:venues.`,
+    );
+  }
+  const route = quoted.route;
   const routeFeeBps = v3RouteFeeBps(route);
   let minOut: bigint;
   let spotOut: bigint;
@@ -537,7 +543,7 @@ async function prepareV3Trade(
     minOut = parseUnits(args.minAmountOut, tokenOut.decimals);
     spotOut = minOut;
   } else {
-    spotOut = await quoteTradeRoute(client, route, v3In, v3Out, amountIn);
+    spotOut = quoted.quotedOut;
     if (spotOut === 0n) {
       throw new Error(
         "verification failed: V3 QuoterV2 returned zero — pass explicit minAmountOut or retry",

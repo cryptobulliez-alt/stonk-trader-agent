@@ -57,6 +57,8 @@ Fee defaults: `minNotionalUsd=3`, `minEdgeBps=10`, `takeProfitPct=3`, `stopLossP
 
 `data/assets.json` — full Robinhood Chain stock-token list. Autopilot **considers** only the **allowlist**; it **buys** only thesis picks.
 
+On-chain venues differ per name (`npm run scan:venues` → `data/venueMap.json`). Prepare auto-picks mark-sane **v3 or v4**; allowlist UI shows venue badges. Names with no liquid pool cannot trade until liquidity appears.
+
 ## Rules
 
 - Follow `docs/TRADING.md`.
