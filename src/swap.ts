@@ -160,7 +160,7 @@ export function formatTradeTweet(trade: TradeResult, tokenId: bigint): string {
   });
 }
 
-/** Canonical StonkTraderBot X fill template (≤280 chars). */
+/** Canonical StonkTraderBot X fill template (≤280 chars). Sells may include realized P&L. */
 export function formatStonkSwapTweet(args: {
   tokenId: string | number | bigint;
   fromAmount: string;
@@ -169,6 +169,10 @@ export function formatStonkSwapTweet(args: {
   toSymbol: string;
   txUrl?: string | null;
   dryRun?: boolean;
+  /** Realized USD P&L on this sell (positive = profit). */
+  realizedPnlUsd?: number | null;
+  /** Realized % vs avg cost on this sell. */
+  realizedPnlPct?: number | null;
 }): string {
   const fromAmt = trimTweetAmt(args.fromAmount);
   const toAmt = trimTweetAmt(args.toAmount);
@@ -177,8 +181,10 @@ export function formatStonkSwapTweet(args: {
   const lines = [
     `StonkBroker #${args.tokenId} swapped ${fromAmt}`,
     `${fromSym} to ${toAmt} ${toSym} on Robinhood Chain using his StonkTraderBot Agent!`,
-    "",
   ];
+  const pnlLine = formatSellPnlLine(args.realizedPnlUsd, args.realizedPnlPct);
+  if (pnlLine) lines.push(pnlLine);
+  lines.push("");
   if (args.dryRun) {
     lines.push("(dry-run — not broadcast)");
   } else if (args.txUrl) {
@@ -186,6 +192,24 @@ export function formatStonkSwapTweet(args: {
   }
   lines.push("", "$STONKBROKER  @realstonkbroker @cryptobullyznft");
   return lines.join("\n").slice(0, 280);
+}
+
+/** e.g. "Profit: +$1.24 (+3.2%)" / "Loss: −$0.34 (−2.8%)" */
+export function formatSellPnlLine(
+  pnlUsd?: number | null,
+  pnlPct?: number | null,
+): string | null {
+  if (pnlUsd == null || !Number.isFinite(pnlUsd)) return null;
+  const sign = pnlUsd >= 0 ? "+" : "−";
+  const abs = Math.abs(pnlUsd);
+  const usd =
+    abs >= 10 ? abs.toFixed(2) : abs >= 1 ? abs.toFixed(2) : abs.toFixed(3);
+  const label = pnlUsd >= 0 ? "Profit" : "Loss";
+  if (pnlPct != null && Number.isFinite(pnlPct)) {
+    const pctSign = pnlPct >= 0 ? "+" : "−";
+    return `${label}: ${sign}$${usd} (${pctSign}${Math.abs(pnlPct).toFixed(1)}%)`;
+  }
+  return `${label}: ${sign}$${usd}`;
 }
 
 function trimTweetAmt(raw: string): string {

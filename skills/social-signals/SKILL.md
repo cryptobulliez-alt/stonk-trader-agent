@@ -20,10 +20,11 @@ Optional rail: recent cashtag search (`X_BEARER_TOKEN` + `useXSignals`). Soft ed
 5. Do not override explicit `risk_off` with bullish buzz.
 6. Low mention count → treat as **neutral** (ignore).
 7. Never call Robinhood `place_*` for TBA execution; X is research/bias + fill posts only.
+8. Mark/RSS event wakes (see `event-signals`) are the primary near-real-time rail; X runs only when research rails ask for it.
 
 ## Merge priority
 
-1. Cash core / risk exits  
+1. Cash core / risk exits / signal risk wakes  
 2. LLM thesis  
 3. X hints (fill empty slots)  
 4. Settings thesis note tickers (if no LLM)

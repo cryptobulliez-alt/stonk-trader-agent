@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { bookNearTs } from "./history.js";
 
 export type FillSide = "buy" | "sell";
 
@@ -8,6 +9,9 @@ export type LedgerFill = {
   ts: number;
   side: FillSide;
   symbol: string;
+  /** Swap pair for display (e.g. WETH / AMZN). */
+  tokenIn?: string;
+  tokenOut?: string;
   qty: number;
   priceUsd: number;
   notionalUsd: number;
@@ -16,6 +20,12 @@ export type LedgerFill = {
   /** Stock price in WETH at fill. */
   priceWeth?: number;
   ethUsd?: number;
+  /** Realized P&L on this sell vs avg cost (null/omit on buys). */
+  realizedPnlUsd?: number | null;
+  realizedPnlPct?: number | null;
+  /** Book NAV right after recording this fill (pass-time snapshot). */
+  portfolioUsd?: number | null;
+  portfolioEth?: number | null;
   dryRun: boolean;
   seeded?: boolean;
   reason?: string;
@@ -152,6 +162,68 @@ function blankPos(symbol: string): PositionBasis {
   return normalizePos({ symbol });
 }
 
+/** Fill has real size (skip dust / broken seed audit rows). */
+export function fillHasSize(f: Pick<LedgerFill, "qty" | "notionalUsd">): boolean {
+  return f.qty > 0 && f.notionalUsd > 0;
+}
+
+/**
+ * Backfill display fields on legacy fills (token pair, P&L %, book NAV).
+ * Drops zero-size seed rows that used to spam Recent fills after full exits.
+ * Persists when anything changes so the UI stays quiet next load.
+ */
+export function enrichLedgerFills(tokenId?: string): LedgerFile {
+  const file = getLedger(tokenId);
+  let dirty = false;
+  const before = file.fills.length;
+  file.fills = file.fills.filter((f) => !(f.seeded && !fillHasSize(f)));
+  if (file.fills.length !== before) dirty = true;
+
+  for (const f of file.fills) {
+    if (!f.tokenIn || !f.tokenOut) {
+      f.tokenIn = f.side === "sell" ? f.symbol : "WETH";
+      f.tokenOut = f.side === "buy" ? f.symbol : "WETH";
+      dirty = true;
+    }
+    if (
+      f.side === "sell" &&
+      (f.realizedPnlPct == null || !Number.isFinite(f.realizedPnlPct))
+    ) {
+      const m = f.reason?.match(/uPnL\s*(-?\d+(?:\.\d+)?)%/i);
+      if (m) {
+        f.realizedPnlPct = Number(m[1]);
+        dirty = true;
+      }
+    }
+    if (
+      (f.portfolioUsd == null || !Number.isFinite(f.portfolioUsd)) &&
+      file.tokenId
+    ) {
+      const book = bookNearTs(f.ts, file.tokenId);
+      if (book) {
+        f.portfolioUsd = round(book.portfolioUsd, 2);
+        const eth =
+          f.ethUsd != null && f.ethUsd > 0
+            ? f.portfolioUsd / f.ethUsd
+            : null;
+        f.portfolioEth =
+          eth != null && Number.isFinite(eth) ? round(eth, 6) : null;
+        dirty = true;
+      }
+    } else if (
+      f.portfolioUsd != null &&
+      (f.portfolioEth == null || !Number.isFinite(f.portfolioEth)) &&
+      f.ethUsd != null &&
+      f.ethUsd > 0
+    ) {
+      f.portfolioEth = round(f.portfolioUsd / f.ethUsd, 6);
+      dirty = true;
+    }
+  }
+  if (dirty) saveRaw(file);
+  return file;
+}
+
 export function getLedger(tokenId?: string): LedgerFile {
   const file = loadRaw();
   if (tokenId && file.tokenId && file.tokenId !== tokenId) {
@@ -194,6 +266,10 @@ export function recordFill(args: {
   dryRun?: boolean;
   seeded?: boolean;
   reason?: string;
+  tokenIn?: string;
+  tokenOut?: string;
+  portfolioUsd?: number | null;
+  portfolioEth?: number | null;
 }): PositionBasis | null {
   const symbol = args.symbol.toUpperCase();
   if (CASH_SYMS.has(symbol)) return null;
@@ -214,6 +290,18 @@ export function recordFill(args: {
     file.positions[k] = normalizePos({ ...v, symbol: k });
   }
   const dryRun = Boolean(args.dryRun);
+
+  let realizedPnlUsd: number | null = null;
+  let realizedPnlPct: number | null = null;
+  const prePos = file.positions[symbol];
+  if (args.side === "sell" && prePos && prePos.avgCostUsd > 0) {
+    const sellQty = Math.min(args.qty, prePos.qty > 0 ? prePos.qty : args.qty);
+    realizedPnlUsd = round((args.priceUsd - prePos.avgCostUsd) * sellQty, 4);
+    realizedPnlPct = round(
+      ((args.priceUsd - prePos.avgCostUsd) / prePos.avgCostUsd) * 100,
+      2,
+    );
+  }
 
   // Dry-run fills are audit-only — never mutate cost basis.
   if (!dryRun) {
@@ -261,10 +349,31 @@ export function recordFill(args: {
     file.positions[symbol] = pos;
   }
 
+  const tokenIn = (args.tokenIn ?? (args.side === "sell" ? symbol : "WETH")).toUpperCase();
+  const tokenOut = (args.tokenOut ?? (args.side === "buy" ? symbol : "WETH")).toUpperCase();
+  let portfolioUsd =
+    args.portfolioUsd != null && Number.isFinite(args.portfolioUsd)
+      ? round(args.portfolioUsd, 2)
+      : null;
+  let portfolioEth =
+    args.portfolioEth != null && Number.isFinite(args.portfolioEth)
+      ? round(args.portfolioEth, 6)
+      : null;
+  if (
+    portfolioEth == null &&
+    portfolioUsd != null &&
+    args.ethUsd != null &&
+    args.ethUsd > 0
+  ) {
+    portfolioEth = round(portfolioUsd / args.ethUsd, 6);
+  }
+
   file.fills.push({
     ts: Date.now(),
     side: args.side,
     symbol,
+    tokenIn,
+    tokenOut,
     qty: round(args.qty, 8),
     priceUsd: round(args.priceUsd, 6),
     notionalUsd: round(notional, 4),
@@ -275,6 +384,10 @@ export function recordFill(args: {
       args.ethUsd != null && args.ethUsd > 0
         ? round(args.ethUsd, 2)
         : undefined,
+    realizedPnlUsd,
+    realizedPnlPct,
+    portfolioUsd,
+    portfolioEth,
     dryRun,
     seeded: args.seeded,
     reason: args.reason,
@@ -290,6 +403,9 @@ export function recordFill(args: {
  * Align ledger qty with on-chain holdings. Missing basis is seeded at mark
  * (flat P&L) so the UI and agent have something to work with.
  * Seeds / backfills WETH basis from USD ÷ ethUsd when needed.
+ *
+ * After full exits, residual dust can round qty/notional to 0 — never seed or
+ * audit those (they used to spam Recent fills as BUY $0.00 rows).
  */
 export function reconcileHoldings(
   tokenId: string,
@@ -313,16 +429,28 @@ export function reconcileHoldings(
     const mark = h.priceUsd;
     if (!(amount > 0) || mark == null || !(mark > 0)) continue;
 
+    const qtyRounded = round(amount, 8);
+    const notionalRounded = round(amount * mark, 4);
     const markWeth = wethFromUsd(mark, ethUsd);
     const pos = file.positions[symbol];
+
+    // Dust left after ~100% exit — ignore; clear empty ledger rows
+    if (!(qtyRounded > 0) || !(notionalRounded > 0)) {
+      if (pos && !(pos.qty > 0)) {
+        delete file.positions[symbol];
+        dirty = true;
+      }
+      continue;
+    }
+
     if (!pos || pos.qty <= 0) {
       const notional = amount * mark;
       const notionalWeth =
         markWeth != null ? amount * markWeth : wethFromUsd(notional, ethUsd) ?? 0;
       file.positions[symbol] = {
         symbol,
-        qty: round(amount, 8),
-        costUsd: round(notional, 4),
+        qty: qtyRounded,
+        costUsd: notionalRounded,
         avgCostUsd: round(mark, 6),
         costWeth: round(notionalWeth, 8),
         avgCostWeth: amount > 0 ? round(notionalWeth / amount, 10) : 0,
@@ -332,13 +460,17 @@ export function reconcileHoldings(
         realizedPnlWeth: 0,
         seeded: true,
       };
+      // Cost-basis only — not a swap; omit from Recent fills (seeded audit).
+      // Still record once so operators can inspect via /api/ledger if needed.
       file.fills.push({
         ts: Date.now(),
         side: "buy",
         symbol,
-        qty: round(amount, 8),
+        tokenIn: "WETH",
+        tokenOut: symbol,
+        qty: qtyRounded,
         priceUsd: round(mark, 6),
-        notionalUsd: round(notional, 4),
+        notionalUsd: notionalRounded,
         notionalWeth: round(notionalWeth, 8),
         priceWeth: markWeth != null ? round(markWeth, 10) : undefined,
         ethUsd: ethUsd != null && ethUsd > 0 ? round(ethUsd, 2) : undefined,
@@ -361,7 +493,10 @@ export function reconcileHoldings(
     // Tokens appeared outside the agent — seed the delta at mark
     if (amount > pos.qty * 1.02) {
       const delta = amount - pos.qty;
+      const deltaQty = round(delta, 8);
       const notional = delta * mark;
+      const notionalUsd = round(notional, 4);
+      if (!(deltaQty > 0) || !(notionalUsd > 0)) continue;
       const notionalWeth =
         markWeth != null ? delta * markWeth : wethFromUsd(notional, ethUsd) ?? 0;
       pos.costUsd = round(pos.costUsd + notional, 4);
@@ -375,9 +510,11 @@ export function reconcileHoldings(
         ts: Date.now(),
         side: "buy",
         symbol,
-        qty: round(delta, 8),
+        tokenIn: "WETH",
+        tokenOut: symbol,
+        qty: deltaQty,
         priceUsd: round(mark, 6),
-        notionalUsd: round(notional, 4),
+        notionalUsd,
         notionalWeth: round(notionalWeth, 8),
         priceWeth: markWeth != null ? round(markWeth, 10) : undefined,
         ethUsd: ethUsd != null && ethUsd > 0 ? round(ethUsd, 2) : undefined,
@@ -394,6 +531,9 @@ export function reconcileHoldings(
       pos.qty = round(amount, 8);
       pos.avgCostUsd = pos.qty > 0 ? round(pos.costUsd / pos.qty, 6) : 0;
       pos.avgCostWeth = pos.qty > 0 ? round(pos.costWeth / pos.qty, 10) : 0;
+      if (!(pos.qty > 0)) {
+        delete file.positions[symbol];
+      }
       dirty = true;
     }
   }
@@ -573,6 +713,9 @@ export function recordActionFill(args: {
   ethUsd?: number | null;
   /** Actual stock qty from Transfer logs (preferred over notional/mark estimate). */
   actualStockQty?: number | null;
+  /** Book NAV at fill time (USD); ETH derived via ethUsd when omitted. */
+  portfolioUsd?: number | null;
+  portfolioEth?: number | null;
 }): PositionBasis | null {
   const side = args.action.side;
   if (side !== "buy" && side !== "sell") return null;
@@ -580,6 +723,14 @@ export function recordActionFill(args: {
   if (notional == null || !(notional > 0)) return null;
   const ethUsd = args.ethUsd ?? args.marks.WETH ?? args.marks.ETH ?? null;
   const notionalWeth = wethFromUsd(notional, ethUsd) ?? undefined;
+  const tokenIn = (args.action.tokenIn ?? "").toUpperCase() || undefined;
+  const tokenOut = (args.action.tokenOut ?? "").toUpperCase() || undefined;
+  const book = {
+    tokenIn,
+    tokenOut,
+    portfolioUsd: args.portfolioUsd,
+    portfolioEth: args.portfolioEth,
+  };
 
   if (side === "buy") {
     const symbol = (args.action.tokenOut ?? "").toUpperCase();
@@ -617,6 +768,7 @@ export function recordActionFill(args: {
       ethUsd,
       dryRun: args.dryRun,
       reason: args.action.reason,
+      ...book,
     });
   }
 
@@ -638,5 +790,6 @@ export function recordActionFill(args: {
     ethUsd,
     dryRun: args.dryRun,
     reason: args.action.reason,
+    ...book,
   });
 }

@@ -133,6 +133,35 @@ function nearEqual(a: Record<string, number>, b: Record<string, number>) {
   return true;
 }
 
+/** Nearest history snapshot at or before `ts` (fallback: closest after). */
+export function bookNearTs(
+  ts: number,
+  tokenId?: string,
+): { portfolioUsd: number; portfolioEth: number | null } | null {
+  const file = getHistory(tokenId);
+  const points = file.points;
+  if (!points.length) return null;
+  let best = points[0];
+  let bestDist = Math.abs(best.ts - ts);
+  for (const p of points) {
+    const dist = Math.abs(p.ts - ts);
+    // Prefer same-or-earlier snapshots when distances are close
+    const prefer =
+      dist < bestDist ||
+      (dist === bestDist && p.ts <= ts && best.ts > ts);
+    if (prefer) {
+      best = p;
+      bestDist = dist;
+    }
+  }
+  // Ignore if further than 6h from the fill
+  if (bestDist > 6 * 60 * 60 * 1000) return null;
+  return {
+    portfolioUsd: best.totalUsd,
+    portfolioEth: null,
+  };
+}
+
 /** Series keys = union across all points, ordered by latest USD weight. */
 export function seriesKeys(points: HistoryPoint[]): string[] {
   const last = points.at(-1);

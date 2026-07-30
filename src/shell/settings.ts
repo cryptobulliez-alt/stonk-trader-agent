@@ -56,6 +56,18 @@ export type ShellSettings = {
   estimateGasEth?: number;
   /** Dashboard override for LLM chat model (else LLM_MODEL / provider default). */
   llmModel?: string;
+  /** Cheap always-on mark/RSS watcher that can wake a pass early. */
+  signalWatchEnabled: boolean;
+  /** Watcher tick interval (floor 15s). */
+  signalWatchMs: number;
+  /** Fire on sharp WETH-relative mark moves. */
+  useMarkSignals: boolean;
+  /** Poll Google/Yahoo/SEC public RSS for allowlist + held. */
+  useRssSignals: boolean;
+  /** Mark move threshold in bps vs lookback (default 200 = 2%). */
+  markShockBps: number;
+  /** Min gap between signal-triggered wakes. */
+  minWakeGapMs: number;
 };
 
 const DEFAULTS: ShellSettings = {
@@ -75,10 +87,16 @@ const DEFAULTS: ShellSettings = {
   dryRun: true,
   minNotionalUsd: 3,
   minEdgeBps: 10,
-  takeProfitPct: 3,
-  stopLossPct: 2.5,
-  addOnlyDipBps: 50,
+  takeProfitPct: 6,
+  stopLossPct: 5,
+  addOnlyDipBps: 100,
   maxRiskPctPerTrade: 1.5,
+  signalWatchEnabled: true,
+  signalWatchMs: 45_000,
+  useMarkSignals: true,
+  useRssSignals: true,
+  markShockBps: 200,
+  minWakeGapMs: 60_000,
 };
 
 function dataDir(): string {
@@ -144,9 +162,9 @@ function normalize(s: ShellSettings): ShellSettings {
     dryRun: s.dryRun === undefined ? true : Boolean(s.dryRun),
     minNotionalUsd: Math.max(1, Number(s.minNotionalUsd) || 3),
     minEdgeBps: clamp(Number(s.minEdgeBps) || 10, 0, 500),
-    takeProfitPct: clamp(Math.max(0, Number(s.takeProfitPct) || 3), 0, 100),
-    stopLossPct: clamp(Math.max(0, Number(s.stopLossPct) || 2.5), 0, 100),
-    addOnlyDipBps: clamp(Number(s.addOnlyDipBps) || 50, 0, 2000),
+    takeProfitPct: clamp(Math.max(0, Number(s.takeProfitPct) || 6), 0, 100),
+    stopLossPct: clamp(Math.max(0, Number(s.stopLossPct) || 5), 0, 100),
+    addOnlyDipBps: clamp(Number(s.addOnlyDipBps) || 100, 0, 2000),
     maxRiskPctPerTrade: clamp(
       Math.max(0.1, Number(s.maxRiskPctPerTrade) || 1.5),
       0.1,
@@ -160,6 +178,15 @@ function normalize(s: ShellSettings): ShellSettings {
       typeof s.llmModel === "string" && s.llmModel.trim()
         ? s.llmModel.trim()
         : undefined,
+    signalWatchEnabled:
+      s.signalWatchEnabled === undefined ? true : Boolean(s.signalWatchEnabled),
+    signalWatchMs: Math.max(15_000, Number(s.signalWatchMs) || 45_000),
+    useMarkSignals:
+      s.useMarkSignals === undefined ? true : Boolean(s.useMarkSignals),
+    useRssSignals:
+      s.useRssSignals === undefined ? true : Boolean(s.useRssSignals),
+    markShockBps: clamp(Math.round(Number(s.markShockBps) || 200), 50, 2_000),
+    minWakeGapMs: Math.max(15_000, Number(s.minWakeGapMs) || 60_000),
   };
 }
 

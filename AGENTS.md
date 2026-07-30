@@ -21,7 +21,7 @@ Default entry: `npm run shell` → dashboard at `http://localhost:3000` + API at
 
 ## Autopilot loop
 
-Default policy: **`core`** (`reserveWethPct=30`, `deployPct≤15` per pass).
+Default policy: **`core`** (`reserveWethPct=30`, `deployPct≤15`, `stopLossPct=5`, `takeProfitPct=6`).
 
 1. Snapshot book + cost basis  
 2. **Signals** — optional X + LLM only when `researchRails` says the pass is ambiguous (default **auto** skips them for TP/SL / cash-restore / near-target hold); mechanical thesis from marks otherwise  
@@ -29,13 +29,15 @@ Default policy: **`core`** (`reserveWethPct=30`, `deployPct≤15` per pass).
    - Cash below reserve → **sells only**  
    - Held names → **take-profit / stop-loss vs WETH** (deeper SL → larger trim) (+ thesis sells)  
    - Opens → **only** `preferBuys` (≤2), sized by deploy + **risk budget** (`maxRiskPctPerTrade`)  
-4. **Fee EV gate** — buys need edge/size vs fees; **risk exits (TP/SL/concentration) clear when notional ≥ min** (losers are allowed); thesis trims still need uPnL ≥ sell cost  
-5. Prepare (mark-sane v3 or v4; TBA-funded buys) → sign if Dry run OFF → optional X fill post  
-6. Repeat on `intervalMs`
+4. **Risk veto** — portfolio-manager gate may drop buys (cooldown, max names, loss streak, low confidence, bad venue); TP/SL never blocked here  
+5. **Fee EV gate** — buys need edge/size vs fees; **risk exits (TP/SL/concentration) clear when notional ≥ min** (losers are allowed); thesis trims still need uPnL ≥ sell cost  
+6. Prepare (mark-sane v3 or v4; TBA-funded buys) → sign if Dry run OFF → optional X fill post; record fill → trade memory  
+7. Repeat on `intervalMs`  
+8. **Signal watch** (while running, default on) — every `signalWatchMs` (~45s) probe RPC marks + public RSS; **wake early** on shocks/news (asymmetric: risk trims immediately; opportunity buys only with cash room). Still fee/core gated. X stays optional.
 
 **Allowlist = candidates**, not a must-buy list. Empty `preferBuys` → hold is correct.
 
-Fee defaults: `minNotionalUsd=3`, `minEdgeBps=10`, `takeProfitPct=3`, `stopLossPct=2.5`, `maxRiskPctPerTrade=1.5`, `addOnlyDipBps=50`, `maxActionsPerPass=3`, `maxNotionalEth=0.05`.
+Fee defaults: `minNotionalUsd=3`, `minEdgeBps=10`, `takeProfitPct=6`, `stopLossPct=5`, `maxRiskPctPerTrade=1.5`, `addOnlyDipBps=100`, `maxActionsPerPass=3`, `maxNotionalEth=0.05`.
 
 ## Policies
 

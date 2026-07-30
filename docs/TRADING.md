@@ -20,7 +20,8 @@
 ```mermaid
 flowchart TD
   book[Book snapshot + cost basis]
-  rails[Rails: LLM · X MCP · RH research MCP · settings thesis]
+  watch[Signal watch: marks + RSS]
+  rails[Rails: LLM · X · settings thesis]
   playbook[This playbook + fee gate]
   decide{Edge after fees?}
   buy[Selective buy 1-2 names]
@@ -28,6 +29,7 @@ flowchart TD
   hold[Hold]
 
   book --> playbook
+  watch -->|wake early| playbook
   rails --> playbook
   playbook --> decide
   decide -->|open/add| buy
@@ -37,8 +39,9 @@ flowchart TD
 
 1. **Book** — cash %, holdings, avg cost, unrealized P&L, deployable above reserve.  
 2. **Rails** — LLM thesis + `preferBuys` / `preferSells`; optional X recent-search buzz (`useXSignals` + `X_BEARER_TOKEN`); optional Robinhood research MCP (quotes — **never** `place_*` for TBA).  
-3. **Playbook rules** — `skills/*/SKILL.md` + cash core, position limits, TP/SL, fee EV gate.  
-4. **Execute** — prepare/sign only if Dry run is OFF.
+3. **Signal watch** — while autopilot runs, cheap mark/RSS ticks can **wake a pass early** (asymmetric: risk trims on bad news/sharp drops; opportunity buys only with cash room). Still fee/core gated.  
+4. **Playbook rules** — `skills/*/SKILL.md` + cash core, position limits, TP/SL, fee EV gate.  
+5. **Execute** — prepare/sign only if Dry run is OFF.
 
 ## Public references (best-practice anchors)
 
@@ -60,7 +63,7 @@ Use these as **principles**, adapted to a fee-heavy on-chain sleeve (not day-tra
 - [CFA Institute — IPS elements for individuals](https://rpc.cfainstitute.org/sites/default/files/-/media/documents/article/position-paper/investment-policy-statement-individual-investors.pdf)  
   - Document risk policy (our settings + this file = lightweight IPS).  
 - [CFA Enterprising Investor — tight stops can hurt](https://rpc.cfainstitute.org/blogs/enterprising-investor/2026/why-tight-stop-losses-often-hurt-investors-and-what-robust-capital-growth-really-requires)  
-  - Stops that are **too tight** chop winners; width should match noise. Our defaults (`stopLossPct` ≈ 2.5–5%, `takeProfitPct` ≈ 3+) are sleeve rules — widen if RH stock tokens are noisy relative to fees.
+  - Stops that are **too tight** chop winners; width should match noise. Defaults: `stopLossPct` ≈ **5%**, `takeProfitPct` ≈ **6%** (asymmetric). After SL: full/near-full exit, 6h buy cooldown, no same-pass redeploy into thin names.
 
 ### Entries / exits (discretionary practice)
 
@@ -81,7 +84,9 @@ Use these as **principles**, adapted to a fee-heavy on-chain sleeve (not day-tra
 4. Buy when thesis / LLM supplies **`preferBuys`** (≤2). Prefer **unheld** names when cash ≫ reserve (restore risk sleeve).  
 5. Size from **deployable** cash above reserve, capped by `deployPct` and `maxNamePct` — one fee-viable ticket beats eight dust tickets.  
 6. Adds to an existing name: prefer **dip vs avg cost** (`addOnlyDipBps`) unless thesis explicitly pyramids into strength.  
-7. Skip if `notional < minNotionalUsd` or expected edge &lt; gas+slip (`minEdgeBps`). When cash is near target, prefer **hold** over forced churn.
+7. Skip if `notional < minNotionalUsd` or expected edge &lt; gas+slip (`minEdgeBps`). When cash is near target, prefer **hold** over forced churn.  
+7b. **Risk veto** — before prepare, drop opens that fail max-names / loss-streak / underwater-sleeve / low confidence / no pool (skills/decision-memory).  
+7c. **Decision memory** — recent fill reflections feed the next LLM pass; do not re-chase stop-outs without a fresh thesis.
 
 ### Exits (sells)
 
@@ -113,6 +118,9 @@ Use these as **principles**, adapted to a fee-heavy on-chain sleeve (not day-tra
 | `maxActionsPerPass` | Heat / churn limit |
 | `thesis` | Operator override notes (may name tickers) |
 | `useXSignals` | When on + `X_BEARER_TOKEN`, recent cashtag buzz biases preferBuys/Sells |
+| `signalWatchEnabled` | Cheap mark/RSS watcher wakes passes early (default on) |
+| `signalWatchMs` / `markShockBps` / `minWakeGapMs` | Watch cadence, mark shock threshold, wake cooldown |
+| `useMarkSignals` / `useRssSignals` | Toggle RPC mark shocks vs public RSS headlines |
 
 ## Anti-patterns (do not do)
 

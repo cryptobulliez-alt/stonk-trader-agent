@@ -11,6 +11,7 @@ import { STOCK_TOKENS, WETH } from "./config.js";
 import { CONTRACTS, dividendStockSymbols } from "./contracts.js";
 import { getEthUsd, priceTokenUsd } from "./prices.js";
 import { findBestEthStockPool } from "./v4.js";
+import { getVenueForSymbol } from "./venueMap.js";
 import {
   riskBudgetBuyCapUsd,
   stopLossTrimFraction,
@@ -314,6 +315,14 @@ export async function analyzeBrokerPortfolio(
             : `v3 via ${route.midSymbol}`
           : null;
       }
+      // Live pool probe can flake under RPC pressure — trust venue scan.
+      if (!tradeableToWeth) {
+        const vm = getVenueForSymbol(h.symbol);
+        if (vm?.tradeable) {
+          tradeableToWeth = true;
+          routeFromWeth = routeFromWeth ?? `venueMap/${vm.preferred ?? "auto"}`;
+        }
+      }
     }
     priced.push({
       ...h,
@@ -425,6 +434,17 @@ function usdToWethAmount(usd: number, ethUsd: number | null): string | null {
   return (usd / ethUsd).toPrecision(6);
 }
 
+/** Floor qty so toPrecision/rounding never asks for more than the TBA holds. */
+function sellAmountIn(amount: number, sellUsd: number, positionUsd: number): string {
+  const frac = Math.min(1, Math.min(sellUsd, positionUsd) / positionUsd);
+  const raw = amount * frac;
+  // 8 dp floor — avoids "need 0.0126656 / hold 0.01266559" prepare failures
+  const floored = Math.floor(raw * 1e8) / 1e8;
+  const capped = Math.min(floored, amount);
+  if (!(capped > 0)) return amount.toFixed(8);
+  return capped.toFixed(8).replace(/\.?0+$/, "") || capped.toFixed(8);
+}
+
 function pushSell(
   actions: PortfolioAction[],
   h: { symbol: string; amount: number; usd: number },
@@ -434,7 +454,7 @@ function pushSell(
   minNotional = MIN_NOTIONAL_USD,
 ) {
   if (sellUsd < minNotional || h.usd <= 0) return;
-  const amountIn = ((Math.min(sellUsd, h.usd) / h.usd) * h.amount).toPrecision(6);
+  const amountIn = sellAmountIn(h.amount, sellUsd, h.usd);
   actions.push({
     action: "swap",
     side: "sell",
@@ -446,6 +466,22 @@ function pushSell(
     tradeable: true,
     priority,
   });
+}
+
+/**
+ * TP/SL notional: target `frac` of the position, but never a fee-dust ticket.
+ * Small names (< 2× min) → full exit. Never return below min when position ≥ min
+ * (the old Math.min(frac×usd, max(min, 0.35×usd)) silently zeroed SL trims).
+ */
+export function riskExitNotionalUsd(
+  positionUsd: number,
+  frac: number,
+  minNotional: number,
+): number {
+  if (!(positionUsd > 0)) return 0;
+  if (positionUsd < minNotional * 2) return positionUsd;
+  const f = Math.min(1, Math.max(0.05, frac));
+  return Math.min(positionUsd, Math.max(minNotional, positionUsd * f));
 }
 
 function pushBuy(
@@ -527,7 +563,21 @@ function buildActions(
     }
   }
 
-  const tradeable = stocks.filter((h) => h.tradeableToWeth && h.usd != null && h.usd > 0);
+  const stopLossPct = opts.stopLossPct ?? 2.5;
+  const takeProfitPct = opts.takeProfitPct ?? 3;
+  const preferSellSet = new Set(
+    (opts.preferSells ?? []).map((s) => s.toUpperCase()),
+  );
+  // Include risk-exit / preferSell names even if the live pool probe flaked.
+  const tradeable = stocks.filter((h) => {
+    if (h.usd == null || !(h.usd > 0)) return false;
+    if (h.tradeableToWeth) return true;
+    const sym = h.symbol.toUpperCase();
+    if (preferSellSet.has(sym)) return true;
+    const pnl = opts.unrealizedPnlPct?.[sym];
+    if (pnl == null || !Number.isFinite(pnl)) return false;
+    return pnl <= -stopLossPct || pnl >= takeProfitPct;
+  });
   const thesisNote = opts.thesis ? ` Thesis: ${opts.thesis}` : "";
 
   if (opts.policy === "core") {
@@ -551,8 +601,8 @@ function buildActions(
             .map((h) => [h.symbol.toUpperCase(), h.priceUsd as number]),
         ),
         minNotionalUsd: minNotional,
-        takeProfitPct: opts.takeProfitPct ?? 3,
-        stopLossPct: opts.stopLossPct ?? 2.5,
+        takeProfitPct,
+        stopLossPct,
         addOnlyDipBps: opts.addOnlyDipBps ?? 50,
         maxNamePct: opts.maxNamePct,
         maxRiskPctPerTrade: opts.maxRiskPctPerTrade ?? 1.5,
@@ -874,45 +924,82 @@ function buildCoreActions(
   const markSold = (sym: string) => soldSyms.add(sym.toUpperCase());
   const alreadySold = (sym: string) => soldSyms.has(sym.toUpperCase());
 
-  // Hard exits — take-profit / stop-loss on held names
+  // Hard exits — take-profit / stop-loss on held names (allow below minN → full exit)
+  // Use explicit map entries only (missing ≠ 0% flat — that silently skipped SLs).
   for (const h of tradeable) {
-    if (h.usd == null || h.usd < minN || alreadySold(h.symbol)) continue;
-    const pnl = pnlOf(h.symbol);
+    if (h.usd == null || h.usd <= 0 || alreadySold(h.symbol)) continue;
+    const pnlRaw = opts.unrealizedPnlPct?.[h.symbol.toUpperCase()];
+    if (pnlRaw == null || !Number.isFinite(pnlRaw)) continue;
+    const pnl = pnlRaw;
     if (pnl >= opts.takeProfitPct) {
       const before = actions.length;
+      const sellUsd = riskExitNotionalUsd(h.usd, 0.5, minN);
+      const floor = sellUsd < minN ? 0 : minN; // full dust exit ok
       pushSell(
         actions,
         { symbol: h.symbol, amount: h.amount, usd: h.usd },
-        Math.min(h.usd * 0.5, Math.max(minN, h.usd * 0.35)),
+        sellUsd,
         `Core: take-profit ${h.symbol} (WETH uPnL +${pnl.toFixed(1)}% ≥ ${opts.takeProfitPct}%)${opts.thesisNote}`,
         1,
-        minN,
+        floor,
       );
       if (actions.length > before) markSold(h.symbol);
       continue;
     }
     if (pnl <= -opts.stopLossPct) {
       const before = actions.length;
-      const frac = stopLossTrimFraction(pnl, opts.stopLossPct);
+      // Full exit on SL — partial trims just re-breached every pass (fee death spiral).
+      const deep = Math.abs(pnl) >= opts.stopLossPct * 1.5;
+      const frac = deep ? 1 : Math.max(0.75, stopLossTrimFraction(pnl, opts.stopLossPct));
+      const sellUsd = riskExitNotionalUsd(h.usd, frac, minN);
+      const floor = 0; // always allow dust SL exit
       pushSell(
         actions,
         { symbol: h.symbol, amount: h.amount, usd: h.usd },
-        Math.min(h.usd * frac, Math.max(minN, h.usd * 0.35)),
-        `Core: stop-loss ${h.symbol} (WETH uPnL ${pnl.toFixed(1)}% ≤ -${opts.stopLossPct}% · trim ~${Math.round(frac * 100)}%)${opts.thesisNote}`,
+        sellUsd,
+        `Core: stop-loss ${h.symbol} (WETH uPnL ${pnl.toFixed(1)}% ≤ -${opts.stopLossPct}% · exit ~${Math.round((sellUsd / h.usd) * 100)}%)${opts.thesisNote}`,
         1,
-        minN,
+        floor,
       );
       if (actions.length > before) markSold(h.symbol);
+      else {
+        actions.push({
+          action: "hold",
+          reason: `Core: stop-loss ${h.symbol} signaled (WETH uPnL ${pnl.toFixed(1)}%) but could not size sell (usd $${h.usd.toFixed(2)})`,
+          tokenIn: h.symbol,
+          tradeable: true,
+          priority: 0,
+        });
+      }
     }
   }
 
-  // Thesis / trend sells (discretionary)
+  // Thesis / trend sells (discretionary) — risk exits already handled above
   const preferSells = (opts.preferSells ?? [])
     .map((s) => s.toUpperCase())
     .filter((s) => bySym.has(s) && !alreadySold(s));
   for (const sym of preferSells) {
     const h = bySym.get(sym)!;
-    if (h.usd == null || h.usd < minN) continue;
+    if (h.usd == null || h.usd <= 0) continue;
+    const pnlRaw = opts.unrealizedPnlPct?.[sym];
+    const isRisk =
+      pnlRaw != null &&
+      (pnlRaw <= -opts.stopLossPct || pnlRaw >= opts.takeProfitPct);
+    if (isRisk) {
+      // Hard-exit path missed this name (e.g. tradeable flake) — full exit.
+      const before = actions.length;
+      pushSell(
+        actions,
+        { symbol: h.symbol, amount: h.amount, usd: h.usd },
+        h.usd,
+        `Core: risk-exit ${sym} via preferSells (WETH uPnL ${pnlRaw!.toFixed(1)}%)${opts.thesisNote}`,
+        1,
+        0,
+      );
+      if (actions.length > before) markSold(sym);
+      continue;
+    }
+    if (h.usd < minN) continue;
     const before = actions.length;
     pushSell(
       actions,

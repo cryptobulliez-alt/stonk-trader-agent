@@ -15,9 +15,15 @@
   "dryRun": true,
   "minNotionalUsd": 3,
   "minEdgeBps": 10,
-  "takeProfitPct": 3,
-  "stopLossPct": 2.5,
-  "addOnlyDipBps": 50,
+  "takeProfitPct": 6,
+  "stopLossPct": 5,
+  "addOnlyDipBps": 100,
   "maxRiskPctPerTrade": 1.5,
-  "llmModel": ""
+  "llmModel": "",
+  "signalWatchEnabled": true,
+  "signalWatchMs": 45000,
+  "useMarkSignals": true,
+  "useRssSignals": true,
+  "markShockBps": 200,
+  "minWakeGapMs": 60000
 }

@@ -623,6 +623,27 @@ button {
   color: var(--muted);
 }
 
+.fill-log .log-line.fill-row {
+  grid-template-columns: 118px 1fr;
+  align-items: baseline;
+}
+
+.fill-log .fill-msg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  white-space: nowrap;
+}
+
+.fill-log .fill-side {
+  font-weight: 600;
+  min-width: 2.6em;
+}
+
+.fill-log .fill-sep {
+  color: var(--muted);
+}
+
 .log-line .msg {
   color: var(--text);
   word-break: break-word;

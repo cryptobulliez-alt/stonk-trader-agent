@@ -15,6 +15,7 @@ Operational skill packs for the Stonk Trader shell. Autopilot loads `## Agent ru
 | [`research-thrift`](./research-thrift/SKILL.md) | Skip LLM/X when book marks decide |
 | [`venue-sanity`](./venue-sanity/SKILL.md) | Refuse exec quotes ≪ independent mark |
 | [`social-signals`](./social-signals/SKILL.md) | X buzz as soft bias only |
+| [`event-signals`](./event-signals/SKILL.md) | Mark/RSS wakes — asymmetric risk vs opportunity |
 | [`onchain-tba`](./onchain-tba/SKILL.md) | TBA funding, gas, no EOA proceeds |
 
 Cursor agents: see also [`.cursor/skills/stonk-trading/SKILL.md`](../.cursor/skills/stonk-trading/SKILL.md).

@@ -143,8 +143,9 @@ export function evaluateFeeGate(args: {
   }
 
   if (args.notionalUsd < args.minNotionalUsd) {
-    if (args.side === "sell" && args.cashCritical) {
-      // allow dust sell only when cash is critically low
+    // Dust tickets: allow cash-critical restores and TP/SL risk exits
+    if (args.side === "sell" && (args.cashCritical || args.riskExit)) {
+      // fall through
     } else {
       return {
         ok: false,

@@ -20,6 +20,7 @@ import { askLlmForThesis, tickersFromText } from "./llm.js";
 import { recordSnapshot } from "./history.js";
 import {
   enrichHoldings,
+  getPosition,
   recordActionFill,
 } from "./ledger.js";
 import { recordTrade } from "./tradeLog.js";
@@ -28,6 +29,23 @@ import { evaluateEoaGasReserve, evaluateFeeGate, isRiskExitReason } from "./trad
 import { fetchXSignals, mergeXHints } from "./xSignals.js";
 import { loadTradingSkills } from "./skills.js";
 import { classifyResearchNeed } from "./researchGate.js";
+import {
+  filterBuyCooldown,
+  isCoreLiquid,
+  markStopLossCooldown,
+} from "./cooldowns.js";
+import { applyRiskVeto } from "./riskVeto.js";
+import {
+  formatMemoryForLlm,
+  recordTradeMemory,
+} from "./tradeMemory.js";
+import {
+  getSignalWatchStatus,
+  startSignalWatch,
+  stopSignalWatch,
+  updateSignalBookSnapshot,
+  type SignalTrigger,
+} from "./signalWatch.js";
 import { getAssetBySymbol } from "../assets.js";
 import { priceTokenUsd } from "../prices.js";
 import { formatEther, type Hash } from "viem";
@@ -39,37 +57,92 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let passInFlight = false;
 /** Epoch ms when the next scheduled pass should start; null while idle/paused or mid-pass. */
 let nextPassAt: number | null = null;
+/** At most one queued signal wake while a pass is in flight. */
+let pendingWake: SignalTrigger | null = null;
+
+function mergePendingWake(next: SignalTrigger): SignalTrigger {
+  if (!pendingWake) return next;
+  // Risk wins over opportunity
+  if (pendingWake.kind === "risk" || next.kind === "risk") {
+    const a = pendingWake.kind === "risk" ? pendingWake : next;
+    const b = pendingWake.kind === "risk" ? next : pendingWake;
+    const symbols = [
+      ...new Set([
+        ...a.symbols,
+        ...(b.kind === "risk" ? b.symbols : []),
+      ]),
+    ];
+    return {
+      kind: "risk",
+      symbols,
+      reasons: [...a.reasons, ...(b.kind === "risk" ? b.reasons : [])],
+      source:
+        a.source !== b.source && b.kind === "risk" ? "mixed" : a.source,
+    };
+  }
+  return {
+    kind: "opportunity",
+    symbols: [...new Set([...pendingWake.symbols, ...next.symbols])].slice(
+      0,
+      2,
+    ),
+    reasons: [...pendingWake.reasons, ...next.reasons],
+    source:
+      pendingWake.source !== next.source ? "mixed" : pendingWake.source,
+  };
+}
+
+/** Called by signal watcher — wake ASAP or queue behind in-flight pass. */
+export function requestSignalWake(trigger: SignalTrigger): void {
+  if (!isRunning()) return;
+  pendingWake = mergePendingWake(trigger);
+  if (passInFlight) {
+    emitEvent(
+      "agent.signal",
+      `Wake queued · ${trigger.kind} · ${trigger.symbols.join(",")}`,
+      { trigger },
+    );
+    return;
+  }
+  scheduleNext(0);
+}
 
 export function startAutopilot() {
   setRunning(true);
   setAgentState("analyzing", "Autopilot started — first pass beginning");
+  startSignalWatch(requestSignalWake);
   void scheduleNext(0);
 }
 
 export function resumeAutopilot() {
   setRunning(true, "Autopilot resumed");
   setAgentState("analyzing", "Autopilot resumed — next pass beginning");
+  startSignalWatch(requestSignalWake);
   void scheduleNext(0);
 }
 
 export function pauseAutopilot() {
   setRunning(false, "Autopilot paused");
+  stopSignalWatch();
   if (timer) {
     clearTimeout(timer);
     timer = null;
   }
   nextPassAt = null;
+  pendingWake = null;
   setAgentState("paused", "Autopilot paused");
 }
 
 /** Fully deactivate autopilot (not the same as pause — no Resume). */
 export function stopAutopilot() {
   setRunning(false, "Autopilot stopped");
+  stopSignalWatch();
   if (timer) {
     clearTimeout(timer);
     timer = null;
   }
   nextPassAt = null;
+  pendingWake = null;
   setAgentState("idle", "Autopilot stopped");
 }
 
@@ -77,6 +150,8 @@ export function getAutopilotSchedule() {
   return {
     nextPassAt,
     passInFlight,
+    signalWatch: getSignalWatchStatus(),
+    pendingWake,
   };
 }
 
@@ -97,16 +172,23 @@ function scheduleNext(delayMs: number) {
     wait === 0
       ? "Next check starting now"
       : `Next check in ${Math.round(wait / 1000)}s`,
-    { nextPassAt, delayMs: wait },
+    { nextPassAt, delayMs: wait, pendingWake: pendingWake?.kind ?? null },
   );
   timer = setTimeout(() => {
     void (async () => {
+      const trigger = pendingWake;
+      pendingWake = null;
       try {
-        await runPass();
+        await runPass(trigger ?? undefined);
       } finally {
         if (isRunning()) {
-          const settings = loadSettings();
-          scheduleNext(settings.intervalMs);
+          // Another wake may have queued during the pass
+          if (pendingWake) {
+            scheduleNext(0);
+          } else {
+            const settings = loadSettings();
+            scheduleNext(settings.intervalMs);
+          }
         } else {
           nextPassAt = null;
         }
@@ -115,8 +197,9 @@ function scheduleNext(delayMs: number) {
   }, wait);
 }
 
-async function runPass(): Promise<void> {
+async function runPass(trigger?: SignalTrigger): Promise<void> {
   if (passInFlight) {
+    if (trigger) pendingWake = mergePendingWake(trigger);
     emitEvent("agent.skip", "Pass already in flight");
     return;
   }
@@ -128,6 +211,14 @@ async function runPass(): Promise<void> {
     // Shell UI dry-run toggle overrides env for this process
     config.dryRun = settings.dryRun;
     const canBroadcast = !settings.dryRun;
+
+    if (trigger) {
+      emitEvent(
+        "agent.wake",
+        `Pass triggered by signal · ${trigger.kind} · ${trigger.symbols.join(",")}`,
+        { trigger },
+      );
+    }
 
     setAgentState("analyzing", "Connecting broker + analyzing portfolio");
     const session = await connectBroker(config);
@@ -231,9 +322,32 @@ async function runPass(): Promise<void> {
     let preferBuys: string[] = tickersFromText(settings.thesis, settings.allowlist);
     let preferSells: string[] = [];
 
+    // Signal risk: seed thesis trims immediately (fee-gated in core)
+    if (trigger?.kind === "risk" && trigger.symbols.length) {
+      preferSells = trigger.symbols.map((s) => s.toUpperCase());
+      thesis = `Signal risk wake (${trigger.source}): ${trigger.reasons[0] ?? trigger.symbols.join(",")}`;
+    }
+    // Signal opportunity: soft buy seeds (cash/gates still apply)
+    if (trigger?.kind === "opportunity" && trigger.symbols.length) {
+      preferBuys = [
+        ...new Set([
+          ...preferBuys,
+          ...trigger.symbols
+            .map((s) => s.toUpperCase())
+            .filter((s) => settings.allowlist.includes(s)),
+        ]),
+      ].slice(0, 2);
+      thesis = `Signal opportunity wake (${trigger.source}): ${trigger.reasons[0] ?? trigger.symbols.join(",")}`;
+    }
+
     const heldStockSyms = holdings
       .map((h) => h.symbol.toUpperCase())
       .filter((s) => !["WETH", "ETH", "USDG", "STONKBROKER"].includes(s));
+
+    updateSignalBookSnapshot({
+      cashPct: preview.cashPct,
+      heldSymbols: heldStockSyms,
+    });
 
     const holdingUsdBySym = Object.fromEntries(
       holdings
@@ -253,6 +367,7 @@ async function runPass(): Promise<void> {
       settingsThesis: settings.thesis,
       minNotionalUsd: settings.minNotionalUsd,
       holdingUsdBySym,
+      signalTrigger: trigger ?? null,
     });
 
     emitEvent(
@@ -304,6 +419,7 @@ async function runPass(): Promise<void> {
       emitEvent("agent.x", xDigest.summary, { reason: research.reason });
     }
 
+    let llmConfidence: number | null = null;
     if (config.llmApiKey && research.needLlm) {
       setAgentState("thinking", "Asking LLM for thesis");
       try {
@@ -328,6 +444,7 @@ async function runPass(): Promise<void> {
           stopLossPct: settings.stopLossPct,
           addOnlyDipBps: settings.addOnlyDipBps,
           maxRiskPctPerTrade: settings.maxRiskPctPerTrade,
+          recentTradeLessons: formatMemoryForLlm(6),
           xSignals: xDigest.ok
             ? {
                 summary: xDigest.summary,
@@ -343,6 +460,7 @@ async function runPass(): Promise<void> {
             : undefined,
         });
         if (plan?.thesis) thesis = plan.thesis;
+        if (plan?.confidence != null) llmConfidence = plan.confidence;
         if (plan?.preferBuys?.length) {
           preferBuys = plan.preferBuys.filter((s) =>
             settings.allowlist.includes(s),
@@ -357,22 +475,31 @@ async function runPass(): Promise<void> {
               holdings.some((h) => h.symbol.toUpperCase() === s),
           );
         }
-        // Hard fallback: excess cash + LLM skipped unheld names → open one candidate
+        // Hard fallback: large cash excess + LLM skipped → open one *liquid core* name only
         const cashPct = preview.cashPct ?? 0;
         const excess = cashPct - settings.reserveWethPct;
+        const riskExitPass =
+          research.stopLossHits.length > 0 ||
+          research.takeProfitHits.length > 0 ||
+          trigger?.kind === "risk";
         if (
-          excess >= 10 &&
+          excess >= 20 &&
           preferBuys.length === 0 &&
-          plan?.stance !== "risk_off"
+          plan?.stance !== "risk_off" &&
+          !riskExitPass
         ) {
           const held = new Set(heldStockSyms);
-          const unheld = settings.allowlist.filter((s) => !held.has(s));
-          const xPick = xDigest.preferBuysHint.find((s) => unheld.includes(s));
-          if (xPick || unheld.length) {
-            preferBuys = [xPick ?? unheld[0]];
+          const unheldCore = settings.allowlist.filter(
+            (s) => !held.has(s) && isCoreLiquid(s),
+          );
+          const xPick = xDigest.preferBuysHint.find((s) =>
+            unheldCore.includes(s),
+          );
+          if (xPick || unheldCore.length) {
+            preferBuys = [xPick ?? unheldCore[0]];
             emitEvent(
               "agent.plan",
-              `fallback deploy: cash +${excess.toFixed(1)}pp over reserve → open ${preferBuys[0]} (unheld allowlist)`,
+              `fallback deploy: cash +${excess.toFixed(1)}pp over reserve → open ${preferBuys[0]} (liquid core)`,
               { preferBuys, reason: "cash_excess_fallback" },
             );
           }
@@ -380,8 +507,14 @@ async function runPass(): Promise<void> {
         if (plan) {
           emitEvent(
             "agent.plan",
-            `stance=${plan.stance} · buys=${preferBuys.join(",") || "—"} · sells=${preferSells.join(",") || "—"}`,
-            { stance: plan.stance, preferBuys, preferSells },
+            `stance=${plan.stance} · conf=${plan.confidence ?? "—"} · buys=${preferBuys.join(",") || "—"} · sells=${preferSells.join(",") || "—"}`,
+            {
+              stance: plan.stance,
+              confidence: plan.confidence,
+              bearCase: plan.bearCase,
+              preferBuys,
+              preferSells,
+            },
           );
         }
       } catch (err) {
@@ -400,13 +533,22 @@ async function runPass(): Promise<void> {
       if (!preferBuys.length && research.mechanicalPreferBuys.length) {
         preferBuys = [...research.mechanicalPreferBuys];
       }
+      // Surface mechanical risk exits as preferSells too (belt + suspenders).
+      preferSells = [
+        ...new Set([
+          ...preferSells,
+          ...research.stopLossHits,
+          ...research.takeProfitHits,
+        ]),
+      ];
       emitEvent(
         "agent.plan",
         `mechanical · buys=${preferBuys.join(",") || "—"} · sells=${
-          [...research.stopLossHits, ...research.takeProfitHits].join(",") || "—"
+          preferSells.join(",") || "—"
         }`,
         {
           preferBuys,
+          preferSells,
           stopLossHits: research.stopLossHits,
           takeProfitHits: research.takeProfitHits,
           reason: research.reason,
@@ -457,6 +599,53 @@ async function runPass(): Promise<void> {
       preferSells = merged.preferSells;
     }
 
+    // Anti-churn: drop preferBuys still in post-SL cooldown
+    const beforeCd = preferBuys;
+    preferBuys = filterBuyCooldown(preferBuys);
+    if (beforeCd.length && preferBuys.length < beforeCd.length) {
+      emitEvent(
+        "agent.skip",
+        `Buy cooldown: blocked ${beforeCd.filter((s) => !preferBuys.includes(s)).join(",")}`,
+      );
+    }
+    // On a risk-exit pass, do not open new risk the same cycle
+    if (
+      (research.stopLossHits.length > 0 ||
+        research.takeProfitHits.length > 0 ||
+        trigger?.kind === "risk") &&
+      preferBuys.length
+    ) {
+      emitEvent(
+        "agent.skip",
+        `Risk-exit pass — deferring buys (${preferBuys.join(",")})`,
+      );
+      preferBuys = [];
+    }
+
+    // Portfolio-manager risk veto (TradingAgents-style approve/reject)
+    if (preferBuys.length) {
+      const veto = applyRiskVeto({
+        preferBuys,
+        holdings: holdings.map((h) => ({
+          symbol: h.symbol,
+          weightPct: h.weightPct,
+          unrealizedPnlWethPct: h.unrealizedPnlWethPct,
+          unrealizedPnlPct: h.unrealizedPnlPct,
+        })),
+        cashPct: preview.cashPct,
+        reserveWethPct: settings.reserveWethPct,
+        confidence: llmConfidence,
+      });
+      if (veto.vetoed.length) {
+        emitEvent(
+          "agent.skip",
+          `Risk veto: ${veto.vetoed.map((v) => `${v.symbol}(${v.reason})`).join(", ")}`,
+          { vetoed: veto.vetoed, allowed: veto.allowed },
+        );
+      }
+      preferBuys = veto.allowed;
+    }
+
     setLastThesis(thesis);
     emitEvent("agent.thesis", thesis);
 
@@ -493,6 +682,26 @@ async function runPass(): Promise<void> {
             tokenIn: p.action.tokenIn,
             tokenOut: p.action.tokenOut,
             reason: p.action.reason,
+          },
+        );
+      }
+    }
+    const plannedSells = plan.analysis.actions.filter(
+      (a) => a.action === "swap" && a.side === "sell",
+    );
+    for (const sym of research.stopLossHits) {
+      const hit = plannedSells.some(
+        (a) => (a.tokenIn ?? "").toUpperCase() === sym,
+      );
+      if (!hit) {
+        emitEvent(
+          "agent.warn",
+          `SL ${sym} signaled but no sell was planned — check venue/size`,
+          {
+            symbol: sym,
+            pnl: unrealizedPnlPct[sym],
+            usd: holdingUsdBySym[sym],
+            actions: plan.analysis.actions.map((a) => a.reason).slice(0, 6),
           },
         );
       }
@@ -611,12 +820,31 @@ async function runPass(): Promise<void> {
       { count: capped.length },
     );
 
+    // Surface missed mechanical TP/SL (plan said sell but no swap prepared)
     if (capped.length === 0) {
-      const holdReason =
-        plan.analysis.actions.find((a) => a.action === "hold")?.reason ??
-        "No actionable swaps this pass";
-      // Defer hold emit to the branch below so fee-skipped plans get one clear line
-      void holdReason;
+      const riskHits = [
+        ...research.stopLossHits,
+        ...research.takeProfitHits,
+      ];
+      if (riskHits.length) {
+        const swapActions = plan.analysis.actions.filter(
+          (a) => a.action === "swap" && a.side === "sell",
+        );
+        const preparedErrs = plan.prepared
+          .filter((p) => "error" in p && p.error)
+          .map(
+            (p) =>
+              `${p.action.tokenIn}→${p.action.tokenOut}: ${"error" in p ? p.error : ""}`,
+          );
+        emitEvent(
+          "agent.warn",
+          `Risk exit signaled (${riskHits.join(",")}) but no sell ready` +
+            (swapActions.length
+              ? ` — ${preparedErrs.join("; ") || "blocked by size/fee gate"}`
+              : " — analysis produced no sell action (check position size / venue)"),
+          { riskHits, swapActions: swapActions.length, preparedErrs },
+        );
+      }
     }
 
     const marks: Record<string, number | null | undefined> = {};
@@ -701,6 +929,32 @@ async function runPass(): Promise<void> {
       return "~";
     }
 
+    function sellPnlForTweet(action: {
+      side?: string;
+      tokenIn?: string;
+      amountIn?: string;
+      notionalUsd?: number;
+    }): { realizedPnlUsd: number | null; realizedPnlPct: number | null } {
+      if (action.side !== "sell") {
+        return { realizedPnlUsd: null, realizedPnlPct: null };
+      }
+      const sym = (action.tokenIn ?? "").toUpperCase();
+      const qty = Number(action.amountIn);
+      const notional = action.notionalUsd;
+      if (!sym || !(qty > 0) || notional == null || !(notional > 0)) {
+        return { realizedPnlUsd: null, realizedPnlPct: null };
+      }
+      const pos = getPosition(tokenId, sym);
+      const avg = pos?.avgCostUsd;
+      if (avg == null || !(avg > 0)) {
+        return { realizedPnlUsd: null, realizedPnlPct: null };
+      }
+      const price = notional / qty;
+      const realizedPnlUsd = (price - avg) * qty;
+      const realizedPnlPct = ((price - avg) / avg) * 100;
+      return { realizedPnlUsd, realizedPnlPct };
+    }
+
     function enqueueSwapTweet(
       action: {
         side?: string;
@@ -708,6 +962,7 @@ async function runPass(): Promise<void> {
         tokenOut?: string;
         amountIn?: string;
         notionalUsd?: number;
+        reason?: string;
       },
       opts: {
         dryRun: boolean;
@@ -715,6 +970,7 @@ async function runPass(): Promise<void> {
         prepared?: Record<string, unknown>;
       },
     ) {
+      const pnl = sellPnlForTweet(action);
       const text = formatStonkSwapTweet({
         tokenId: session.tokenId,
         fromAmount: action.amountIn ?? "?",
@@ -723,6 +979,8 @@ async function runPass(): Promise<void> {
         toSymbol: action.tokenOut ?? "?",
         txUrl: opts.txHash ? txUrl(opts.txHash as `0x${string}`) : null,
         dryRun: opts.dryRun,
+        realizedPnlUsd: pnl.realizedPnlUsd,
+        realizedPnlPct: pnl.realizedPnlPct,
       });
       tweetQueue.push(text);
     }
@@ -737,6 +995,17 @@ async function runPass(): Promise<void> {
       );
     }
 
+    const portfolioUsd =
+      preview.contentsUsd != null && Number.isFinite(preview.contentsUsd)
+        ? preview.contentsUsd
+        : null;
+    const portfolioEth =
+      portfolioUsd != null &&
+      preview.ethUsd != null &&
+      preview.ethUsd > 0
+        ? portfolioUsd / preview.ethUsd
+        : null;
+
     if (capped.length === 0) {
       const holdReason =
         plan.analysis.actions.find((a) => a.action === "hold")?.reason ??
@@ -749,13 +1018,29 @@ async function runPass(): Promise<void> {
           "agent.dry_run",
           `[would] ${(a.side ?? "swap").toUpperCase()} ${a.amountIn} ${a.tokenIn} → ${a.tokenOut} — ${a.reason}`,
         );
+        if (settings.postToX) {
+          enqueueSwapTweet(a, { dryRun: true, prepared: item.prepared });
+        }
         recordActionFill({
           tokenId,
           action: a,
           marks,
           dryRun: true,
           ethUsd: preview.ethUsd,
+          portfolioUsd,
+          portfolioEth,
         });
+        emitEvent(
+          "agent.fill",
+          `Fill recorded (dry) ${(a.side ?? "swap").toUpperCase()} ${a.tokenIn}→${a.tokenOut}`,
+          {
+            side: a.side,
+            tokenIn: a.tokenIn,
+            tokenOut: a.tokenOut,
+            notionalUsd: a.notionalUsd,
+            dryRun: true,
+          },
+        );
         recordTrade({
           tokenId,
           side: a.side,
@@ -769,9 +1054,6 @@ async function runPass(): Promise<void> {
           ethUsd: preview.ethUsd,
           txs: [],
         });
-        if (settings.postToX) {
-          enqueueSwapTweet(a, { dryRun: true, prepared: item.prepared });
-        }
       }
       emitEvent("agent.warn", "Dry run on — turn off Dry run to broadcast");
     } else if (eoaGas.critical) {
@@ -895,6 +1177,8 @@ async function runPass(): Promise<void> {
                     dryRun: false,
                     ethUsd: preview.ethUsd,
                     actualStockQty,
+                    portfolioUsd,
+                    portfolioEth,
                   });
                   continue;
                 }
@@ -924,6 +1208,28 @@ async function runPass(): Promise<void> {
             })),
           });
           if (ok) {
+            // Tweet / memory need avg cost *before* ledger mutates on sell
+            const pnl = sellPnlForTweet(item.action);
+            if (settings.postToX) {
+              enqueueSwapTweet(item.action, {
+                dryRun: false,
+                txHash: primaryHash ?? hashes.at(-1),
+                prepared: item.prepared,
+              });
+            }
+            const memSym =
+              item.action.side === "sell"
+                ? (item.action.tokenIn ?? "").toUpperCase()
+                : (item.action.tokenOut ?? "").toUpperCase();
+            if (memSym && (item.action.side === "buy" || item.action.side === "sell")) {
+              recordTradeMemory({
+                side: item.action.side,
+                symbol: memSym,
+                notionalUsd: item.action.notionalUsd ?? 0,
+                realizedPnlPct: pnl.realizedPnlPct,
+                reason: item.action.reason,
+              });
+            }
             recordActionFill({
               tokenId,
               action: item.action,
@@ -931,13 +1237,26 @@ async function runPass(): Promise<void> {
               dryRun: false,
               ethUsd: preview.ethUsd,
               actualStockQty,
+              portfolioUsd,
+              portfolioEth,
             });
-            if (settings.postToX) {
-              enqueueSwapTweet(item.action, {
+            emitEvent(
+              "agent.fill",
+              `Fill recorded ${(item.action.side ?? "swap").toUpperCase()} ${item.action.tokenIn}→${item.action.tokenOut}`,
+              {
+                side: item.action.side,
+                tokenIn: item.action.tokenIn,
+                tokenOut: item.action.tokenOut,
+                notionalUsd: item.action.notionalUsd,
                 dryRun: false,
-                txHash: primaryHash ?? hashes.at(-1),
-                prepared: item.prepared,
-              });
+                hash: primaryHash ?? hashes.at(-1),
+              },
+            );
+            if (
+              item.action.side === "sell" &&
+              /stop-loss/i.test(item.action.reason ?? "")
+            ) {
+              markStopLossCooldown(item.action.tokenIn ?? "");
             }
           }
         } catch (err) {
@@ -972,6 +1291,33 @@ async function runPass(): Promise<void> {
             id: posted.id,
           });
         }
+      }
+    }
+
+    // Chart continuity — force a post-pass book point when anything traded
+    if (capped.length > 0) {
+      try {
+        const after = await analyzeBrokerPortfolio(client, Number(tokenId), {
+          policy: settings.policy,
+          reserveWethPct: settings.reserveWethPct,
+          deployPct: settings.deployPct,
+          symbols: settings.allowlist,
+        });
+        recordSnapshot({
+          tokenId,
+          force: true,
+          holdings: [
+            ...after.holdings.map((h) => ({
+              symbol: h.symbol,
+              usd: h.usd,
+            })),
+            ...(after.ethBalanceUsd != null && after.ethBalanceUsd > 0
+              ? [{ symbol: "ETH", usd: after.ethBalanceUsd }]
+              : []),
+          ],
+        });
+      } catch {
+        /* soft — UI refresh still pulls live book */
       }
     }
 

@@ -81,6 +81,25 @@ type Status = {
     lastError: string | null;
     nextPassAt?: number | null;
     passInFlight?: boolean;
+    signalWatch?: {
+      enabled: boolean;
+      running: boolean;
+      lastTickAt: number | null;
+      lastWakeAt: number | null;
+      lastSignals: Array<{
+        ts: number;
+        kind: string;
+        symbol: string;
+        reason: string;
+        source: string;
+      }>;
+    };
+    pendingWake?: {
+      kind: string;
+      symbols: string[];
+      reasons: string[];
+      source: string;
+    } | null;
   };
   balances?: {
     eoa: string;
@@ -125,6 +144,12 @@ type Settings = {
   maxRiskPctPerTrade: number;
   estimateGasEth?: number;
   llmModel?: string;
+  signalWatchEnabled?: boolean;
+  signalWatchMs?: number;
+  useMarkSignals?: boolean;
+  useRssSignals?: boolean;
+  markShockBps?: number;
+  minWakeGapMs?: number;
 };
 
 type ShellEvent = {
@@ -165,6 +190,7 @@ type Portfolio = {
     cashUsd: number | null;
     cashPct: number | null;
     targetCashPct: number | null;
+    ethUsd?: number | null;
     holdings: Array<{
       symbol: string;
       amount: number;
@@ -202,9 +228,17 @@ type Portfolio = {
       ts: number;
       side: string;
       symbol: string;
+      tokenIn?: string;
+      tokenOut?: string;
       qty: number;
       priceUsd: number;
       notionalUsd: number;
+      notionalWeth?: number;
+      ethUsd?: number;
+      realizedPnlUsd?: number | null;
+      realizedPnlPct?: number | null;
+      portfolioUsd?: number | null;
+      portfolioEth?: number | null;
       dryRun: boolean;
       seeded?: boolean;
       reason?: string;
@@ -303,9 +337,9 @@ const SETTING_TIPS = {
   minEdgeBps:
     "Preferred buy edge in bps vs round-trip gas+slip. On small books, buys still pass if the ticket is ≥10× estimated entry fees (and under 8% fee drag).",
   takeProfitPct:
-    "Trim when WETH-relative unrealized P&L % ≥ this (stock beat idle WETH). Banks gains into cash. Max 100.",
+    "Trim when WETH-relative unrealized P&L % ≥ this (stock beat idle WETH). Default 6 — bank gains into cash. Max 100.",
   stopLossPct:
-    "Cut/trim when WETH-relative unrealized P&L % ≤ −this (stock underperformed idle WETH). Risk exit — clears fee gate at min notional even when dollar uPnL is negative.",
+    "Full/near-full exit when WETH-relative unrealized P&L % ≤ −this. Default 5 (wider than 2.5 to avoid fee-churn). Risk exit clears fee gate; 6h buy cooldown after SL.",
   maxRiskPctPerTrade:
     "Max % of book at risk if stopLossPct hits on a new open. Caps buy size: book × this / stopLossPct (position-sizing skill).",
   addOnlyDipBps:
@@ -322,6 +356,18 @@ const SETTING_TIPS = {
     "When yes and X_BEARER_TOKEN is set, fetch cashtag buzz only when Research rails says the pass needs research (not every pass in auto mode).",
   researchRails:
     "auto = skip LLM/X when TP/SL, cash-restore, or near-target hold are obvious from marks; always = every pass; off = never call LLM/X.",
+  signalWatchEnabled:
+    "When yes and autopilot is running, poll marks + public RSS between interval passes and wake early on shocks/news (asymmetric: risk trims vs gated buys).",
+  signalWatchMs:
+    "How often the signal watcher ticks (marks + RSS). Minimum 15s. Default 45s. Independent of the main interval.",
+  useMarkSignals:
+    "Wake on sharp WETH-relative mark moves vs a ~5m lookback (RPC only — free).",
+  useRssSignals:
+    "Wake on Google/Yahoo/SEC public RSS headlines for held (bearish→trim) or unheld (bullish→buy if cash room).",
+  markShockBps:
+    "Mark move threshold in bps to wake (200 = 2%). Lower = more sensitive / more wakes.",
+  minWakeGapMs:
+    "Minimum time between signal-triggered passes. Protects against wake spam.",
   swapVenue:
     "Which Uniswap engine to use for ETH/WETH↔stock. auto = probe v3 and v4 and pick the mark-sane quote (recommended — many names only have real v3 liquidity). v3 / v4 = force that venue when it clears the mark gate.",
   maxExecVsMarkBps:
@@ -432,9 +478,11 @@ function formatIntervalLabel(ms: number): string {
 function IntervalDurationField({
   ms,
   onCommit,
+  minMs = 30_000,
 }: {
   ms: number;
   onCommit: (ms: number) => void;
+  minMs?: number;
 }) {
   const parts = msToHms(ms);
   const [h, setH] = useState(String(parts.h));
@@ -462,9 +510,9 @@ function IntervalDurationField({
     if (mm >= 60) {
       const addH = Math.floor(mm / 60);
       mm = mm % 60;
-      onCommit(Math.max(30_000, hmsToMs(hh + addH, mm, ss)));
+      onCommit(Math.max(minMs, hmsToMs(hh + addH, mm, ss)));
     } else {
-      onCommit(Math.max(30_000, hmsToMs(hh, mm, ss)));
+      onCommit(Math.max(minMs, hmsToMs(hh, mm, ss)));
     }
   }
 
@@ -527,6 +575,15 @@ function IntervalDurationField({
 function fmtUsd(n: number | null | undefined, digits = 2) {
   if (n == null || !Number.isFinite(n)) return "—";
   return `$${n.toFixed(digits)}`;
+}
+
+/** Compact qty for fill legs (stock vs WETH). */
+function fmtFillQty(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || !(n > 0)) return "—";
+  if (n >= 100) return n.toFixed(2);
+  if (n >= 1) return n.toFixed(4);
+  if (n >= 0.01) return n.toFixed(5);
+  return n.toFixed(6);
 }
 
 function fmtPnl(n: number | null | undefined, pct: number | null | undefined) {
@@ -759,6 +816,8 @@ export default function HomePage() {
   const portfolioInflight = useRef(0);
   const tradesInflight = useRef(0);
   const prevTab = useRef<Tab | null>(null);
+  const lastDashRefreshEventId = useRef<string | null>(null);
+  const dashRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [allowModalOpen, setAllowModalOpen] = useState(false);
@@ -810,9 +869,11 @@ export default function HomePage() {
     setBroker(res.broker);
   }
 
-  async function refreshPortfolio() {
-    portfolioInflight.current += 1;
-    setLoadingPortfolio(true);
+  async function refreshPortfolio(opts?: { quiet?: boolean }) {
+    if (!opts?.quiet) {
+      portfolioInflight.current += 1;
+      setLoadingPortfolio(true);
+    }
     let tokenId: string | undefined;
     try {
       const p = await api<{ ok: true } & Portfolio>("/api/portfolio");
@@ -820,13 +881,25 @@ export default function HomePage() {
       setBroker(p.broker);
       tokenId = p.broker.tokenId;
     } finally {
-      portfolioInflight.current = Math.max(0, portfolioInflight.current - 1);
-      if (portfolioInflight.current === 0) setLoadingPortfolio(false);
+      if (!opts?.quiet) {
+        portfolioInflight.current = Math.max(0, portfolioInflight.current - 1);
+        if (portfolioInflight.current === 0) setLoadingPortfolio(false);
+      }
     }
     // History is secondary — don't keep the refresh indicator waiting on it
     if (tokenId) {
       void refreshHistory(tokenId).catch(() => undefined);
     }
+  }
+
+  /** After a fill / pass: refresh stats, holdings, charts, logs, balances (debounced). */
+  function scheduleDashboardRefresh() {
+    if (dashRefreshTimer.current) clearTimeout(dashRefreshTimer.current);
+    dashRefreshTimer.current = setTimeout(() => {
+      void refreshStatus().catch(() => undefined);
+      void refreshPortfolio({ quiet: true }).catch(() => undefined);
+      void refreshTrades(undefined, { quiet: true }).catch(() => undefined);
+    }, 350);
   }
 
   async function refreshHistory(tokenId?: string) {
@@ -1012,18 +1085,28 @@ export default function HomePage() {
     };
   }, [tab, status?.env.hasLlm]);
 
-  // Refresh trade log when txs land
+  // Refresh stats / portfolio / charts / trade log after each action or pass
   useEffect(() => {
     const last = events.at(-1);
-    if (!last) return;
-    if (
+    if (!last || last.id === lastDashRefreshEventId.current) return;
+    const passDone =
+      last.type === "agent.state" && /pass complete/i.test(last.message);
+    const should =
       last.type === "agent.tx" ||
       last.type === "agent.dry_run" ||
-      last.type === "agent.prepare"
-    ) {
-      void refreshTrades(undefined, { quiet: true }).catch(() => undefined);
-    }
+      last.type === "agent.fill" ||
+      last.type === "agent.prepare" ||
+      passDone;
+    if (!should) return;
+    lastDashRefreshEventId.current = last.id;
+    scheduleDashboardRefresh();
   }, [events]);
+
+  useEffect(() => {
+    return () => {
+      if (dashRefreshTimer.current) clearTimeout(dashRefreshTimer.current);
+    };
+  }, []);
 
   const cashPct = portfolio?.analysis.cashPct ?? null;
   const cashUsd = portfolio?.analysis.cashUsd ?? null;
@@ -1704,25 +1787,124 @@ export default function HomePage() {
                     <>
                       <h2 style={{ marginTop: 18 }}>Recent fills</h2>
                       <p className="sub" style={{ marginBottom: 8 }}>
-                        Live fills update avg cost. Dry-run lines are audit-only.
-                        <span className="seeded"> ~</span> = cost seeded at mark
-                        (unknown prior entry).
+                        Both legs of each swap. Book is TBA NAV after the fill.
                       </p>
-                      <div className="log">
-                        {portfolio.ledger.fills.slice(0, 12).map((f, i) => (
-                          <div key={`${f.ts}-${i}`} className="log-line">
-                            <span>
-                              {new Date(f.ts).toLocaleTimeString()}{" "}
-                              {f.dryRun ? "[dry]" : f.seeded ? "[seed]" : "[live]"}
-                            </span>
-                            <span className="msg">
-                              {f.side.toUpperCase()} {f.qty.toFixed(4)} {f.symbol} @{" "}
-                              {fmtUsd(f.priceUsd, 4)} · {fmtUsd(f.notionalUsd)}
-                              {f.reason ? ` — ${f.reason}` : ""}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                      <table className="holdings" style={{ marginTop: 0 }}>
+                        <thead>
+                          <tr>
+                            <th>Time</th>
+                            <th>Side</th>
+                            <th>Sold</th>
+                            <th>Bought</th>
+                            <th>Notional</th>
+                            <th>P&amp;L</th>
+                            <th>Book USD</th>
+                            <th>Book ETH</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {portfolio.ledger.fills
+                            .filter(
+                              (f) =>
+                                !f.seeded && f.qty > 0 && f.notionalUsd > 0,
+                            )
+                            .slice(0, 12)
+                            .map((f, i) => {
+                            const tokenIn = (
+                              f.tokenIn ??
+                              (f.side === "sell" ? f.symbol : "WETH")
+                            ).toUpperCase();
+                            const tokenOut = (
+                              f.tokenOut ??
+                              (f.side === "buy" ? f.symbol : "WETH")
+                            ).toUpperCase();
+                            const ethUsd =
+                              f.ethUsd ??
+                              portfolio.analysis.ethUsd ??
+                              status?.balances.ethUsd ??
+                              null;
+                            const wethAmt =
+                              f.notionalWeth != null && f.notionalWeth > 0
+                                ? f.notionalWeth
+                                : ethUsd != null &&
+                                    ethUsd > 0 &&
+                                    f.notionalUsd > 0
+                                  ? f.notionalUsd / ethUsd
+                                  : null;
+                            const stockAmt = f.qty > 0 ? f.qty : null;
+                            const soldAmt =
+                              f.side === "sell" ? stockAmt : wethAmt;
+                            const boughtAmt =
+                              f.side === "buy" ? stockAmt : wethAmt;
+                            const legacyPnl = (() => {
+                              if (f.realizedPnlPct != null) {
+                                return f.realizedPnlPct;
+                              }
+                              const m = f.reason?.match(
+                                /uPnL\s*(-?\d+(?:\.\d+)?)%/i,
+                              );
+                              return m ? Number(m[1]) : null;
+                            })();
+                            const pnl =
+                              f.side === "sell" &&
+                              legacyPnl != null &&
+                              Number.isFinite(legacyPnl)
+                                ? `${legacyPnl >= 0 ? "+" : "−"}${Math.abs(legacyPnl).toFixed(1)}%`
+                                : "—";
+                            const pnlClass =
+                              f.side === "sell" &&
+                              legacyPnl != null &&
+                              Number.isFinite(legacyPnl)
+                                ? legacyPnl >= 0
+                                  ? "pnl-up"
+                                  : "pnl-down"
+                                : "pnl-flat";
+                            const bookEth =
+                              f.portfolioEth != null &&
+                              Number.isFinite(f.portfolioEth)
+                                ? f.portfolioEth.toFixed(4)
+                                : f.portfolioUsd != null &&
+                                    ethUsd != null &&
+                                    ethUsd > 0
+                                  ? (f.portfolioUsd / ethUsd).toFixed(4)
+                                  : null;
+                            return (
+                              <tr key={`${f.ts}-${i}`}>
+                                <td>
+                                  {new Date(f.ts).toLocaleTimeString(undefined, {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    second: "2-digit",
+                                  })}
+                                  <span className="sub" style={{ display: "block", fontSize: 11 }}>
+                                    {f.dryRun
+                                      ? "dry"
+                                      : f.seeded
+                                        ? "seed"
+                                        : "live"}
+                                  </span>
+                                </td>
+                                <td>{f.side.toUpperCase()}</td>
+                                <td>
+                                  {fmtFillQty(soldAmt)} {tokenIn}
+                                </td>
+                                <td>
+                                  {fmtFillQty(boughtAmt)} {tokenOut}
+                                </td>
+                                <td>{fmtUsd(f.notionalUsd)}</td>
+                                <td className={pnlClass}>{pnl}</td>
+                                <td>
+                                  {f.portfolioUsd != null &&
+                                  Number.isFinite(f.portfolioUsd)
+                                    ? fmtUsd(f.portfolioUsd)
+                                    : "—"}
+                                </td>
+                                <td>{bookEth != null ? bookEth : "—"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </>
                   )}
                   <h2 style={{ marginTop: 18 }}>Actions</h2>
@@ -2421,6 +2603,108 @@ export default function HomePage() {
                     <option value="always">always</option>
                     <option value="off">off</option>
                   </select>
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.signalWatchEnabled}>
+                    Signal watch
+                  </TipLabel>
+                  <select
+                    value={
+                      settingsDraft.signalWatchEnabled !== false ? "yes" : "no"
+                    }
+                    onChange={(e) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        signalWatchEnabled: e.target.value === "yes",
+                      })
+                    }
+                  >
+                    <option value="yes">yes</option>
+                    <option value="no">no</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.signalWatchMs}>
+                    Watch interval
+                  </TipLabel>
+                  <IntervalDurationField
+                    ms={settingsDraft.signalWatchMs ?? 45_000}
+                    onCommit={(nextMs) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        signalWatchMs: nextMs,
+                      })
+                    }
+                    minMs={15_000}
+                  />
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.useMarkSignals}>
+                    Mark signals
+                  </TipLabel>
+                  <select
+                    value={
+                      settingsDraft.useMarkSignals !== false ? "yes" : "no"
+                    }
+                    onChange={(e) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        useMarkSignals: e.target.value === "yes",
+                      })
+                    }
+                  >
+                    <option value="yes">yes</option>
+                    <option value="no">no</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.useRssSignals}>
+                    RSS signals
+                  </TipLabel>
+                  <select
+                    value={settingsDraft.useRssSignals !== false ? "yes" : "no"}
+                    onChange={(e) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        useRssSignals: e.target.value === "yes",
+                      })
+                    }
+                  >
+                    <option value="yes">yes</option>
+                    <option value="no">no</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.markShockBps}>
+                    Mark shock bps
+                  </TipLabel>
+                  <SettingsNumber
+                    value={settingsDraft.markShockBps ?? 200}
+                    min={50}
+                    max={2000}
+                    step={25}
+                    onCommit={(n) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        markShockBps: n ?? 200,
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <TipLabel tip={SETTING_TIPS.minWakeGapMs}>
+                    Min wake gap
+                  </TipLabel>
+                  <IntervalDurationField
+                    ms={settingsDraft.minWakeGapMs ?? 60_000}
+                    onCommit={(nextMs) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        minWakeGapMs: nextMs,
+                      })
+                    }
+                    minMs={15_000}
+                  />
                 </div>
                 <div className="field">
                   <TipLabel tip={SETTING_TIPS.swapVenue}>Swap venue</TipLabel>

@@ -43,4 +43,5 @@ When changing trading logic, read and respect runtime skill packs under [`skills
 - [selective-entries](../../../skills/selective-entries/SKILL.md)
 - [fee-ev](../../../skills/fee-ev/SKILL.md)
 - [social-signals](../../../skills/social-signals/SKILL.md)
+- [event-signals](../../../skills/event-signals/SKILL.md)
 - [onchain-tba](../../../skills/onchain-tba/SKILL.md)

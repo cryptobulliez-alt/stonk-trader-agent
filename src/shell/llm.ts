@@ -9,18 +9,21 @@ const SYSTEM = `You are a local StonkBroker TBA portfolio agent on Robinhood Cha
 Follow skills/*/SKILL.md (injected as playbook) and docs/TRADING.md:
 - Allowlist = CANDIDATES. Never buy every name. Prefer 1 (max 2) selective opens.
 - Cash target is ~reserveWethPct (default 30%). Cash well ABOVE that is dry powder that should be put to work — not parked forever.
-- When cashExcessPct >= 10 and unheldAllowlist is non-empty: stance should be "risk_on" and preferBuys MUST include 1 symbol from unheldAllowlist (open a new sleeve name). Only use stance "hold" or empty preferBuys if stance is "risk_off" with a clear risk reason.
-- Do NOT refuse to buy solely because currently held names are flat/noisy — those are separate; look at unheld candidates for diversification toward the cash target.
+- When cashExcessPct >= 20 and unheldAllowlist is non-empty: stance "risk_on" and preferBuys SHOULD include 1 **liquid** name (AAPL/MSFT/GOOGL/AMZN/META/NVDA/TSLA/SPY/QQQ preferred). Empty preferBuys only if "risk_off".
+- Prefer hold dry powder over buying thin single-name ETFs (USO/SLV-class) after stop-outs.
 - Adding to an existing name: only if dip vs avg cost or a strong continuation thesis.
 - Never send TBA proceeds to the owner EOA.
 - Cut losers / bank winners on **WETH-relative** uPnL (stock vs idle WETH) — not USD (ETH/USD noise).
 - Stop-loss / take-profit are HARD exits — they execute even when dollar uPnL is negative (fee gate still requires minNotional).
 - Optional xSignals (cashtag buzz) may bias preferBuys/preferSells; do not invent tickers outside allowlist.
 - Size opens so a stop hit stays within maxRiskPctPerTrade of book.
-- Output JSON: { thesis, preferBuys, preferSells, stance }.
+- Honor recentTradeLessons (past fills) — do not re-open names that just stop-lost without a fresh catalyst.
+- Output JSON: { thesis, preferBuys, preferSells, stance, confidence, bearCase }.
   - preferBuys: 0–2 allowlist symbols (empty only if risk_off or cash already near target).
   - preferSells: 0–2 held symbols for broken trend (else rely on TP/SL).
   - stance: "risk_on" | "risk_off" | "hold".
+  - confidence: 1–5 (5 = high conviction). Opens with confidence < 3 are often vetoed.
+  - bearCase: one short risk sentence for the top preferBuy (or "n/a").
 - Not financial advice. Stock tokens are geo-restricted.`;
 
 export type LlmPlan = {
@@ -28,6 +31,9 @@ export type LlmPlan = {
   preferBuys: string[];
   preferSells: string[];
   stance: "risk_on" | "risk_off" | "hold";
+  /** 1–5 conviction; null if model omitted. */
+  confidence: number | null;
+  bearCase: string;
 };
 
 export type LlmProvider = "openai" | "anthropic";
@@ -239,6 +245,8 @@ export async function askLlmForThesis(
       preferBuysHint?: string[];
       preferSellsHint?: string[];
     };
+    /** TradingAgents-style reflections from recent fills. */
+    recentTradeLessons?: string;
   },
 ): Promise<LlmPlan | null> {
   if (!config.llmApiKey) return null;
@@ -288,6 +296,7 @@ export async function askLlmForThesis(
         hint: "TP/SL use WETH-relative uPnL (stock vs idle WETH). One fee-viable ticket into an unheld name beats spraying. Empty preferBuys only if risk_off or cash near target. Cap open size so stop ≈ maxRiskPctPerTrade of book.",
       },
       xSignals: ctx.xSignals ?? undefined,
+      recentTradeLessons: ctx.recentTradeLessons || undefined,
     },
     null,
     2,
@@ -321,7 +330,7 @@ async function callOpenAi(config: AppConfig, user: string): Promise<LlmPlan> {
           role: "system",
           content:
             SYSTEM +
-            "\nRespond JSON only: {thesis, preferBuys: string[], preferSells: string[], stance}. Escape quotes inside thesis. Keep thesis under 400 chars.",
+            "\nRespond JSON only: {thesis, preferBuys: string[], preferSells: string[], stance, confidence: number, bearCase: string}. Escape quotes inside thesis/bearCase. Keep thesis under 400 chars.",
         },
         { role: "user", content: user },
       ],
@@ -350,7 +359,7 @@ async function callAnthropic(config: AppConfig, user: string): Promise<LlmPlan> 
       max_tokens: 800,
       system:
         SYSTEM +
-        "\nRespond with a single JSON object only (no markdown). Keys: thesis (string), preferBuys (string[]), preferSells (string[]), stance (risk_on|risk_off|hold). Escape any quotes inside thesis with \\\". Keep thesis under 400 chars.",
+        "\nRespond with a single JSON object only (no markdown). Keys: thesis (string), preferBuys (string[]), preferSells (string[]), stance (risk_on|risk_off|hold), confidence (1-5 number), bearCase (string). Escape any quotes inside thesis/bearCase with \\\". Keep thesis under 400 chars.",
       messages: [{ role: "user", content: user }],
     }),
   });
@@ -412,7 +421,23 @@ function parsePlanLoose(raw: string): LlmPlan {
     }
   }
 
-  return { thesis, preferBuys, preferSells, stance };
+  const confMatch = raw.match(/"confidence"\s*:\s*(\d+(?:\.\d+)?)/i);
+  const confidence = normalizeConfidence(
+    confMatch?.[1] != null ? Number(confMatch[1]) : null,
+  );
+  let bearCase = "n/a";
+  const bearQuoted = raw.match(/"bearCase"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  if (bearQuoted?.[1]) {
+    bearCase = bearQuoted[1].replace(/\\"/g, '"').replace(/\\n/g, " ").slice(0, 200);
+  }
+
+  return { thesis, preferBuys, preferSells, stance, confidence, bearCase };
+}
+
+function normalizeConfidence(raw: unknown): number | null {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(1, Math.min(5, Math.round(n)));
 }
 
 function normalizePlan(obj: {
@@ -420,6 +445,8 @@ function normalizePlan(obj: {
   preferBuys?: string[];
   preferSells?: string[];
   stance?: string;
+  confidence?: unknown;
+  bearCase?: string;
 }): LlmPlan {
   const stanceRaw = (obj.stance ?? "hold").toLowerCase();
   const stance: LlmPlan["stance"] =
@@ -438,6 +465,11 @@ function normalizePlan(obj: {
     preferBuys: preferBuys.slice(0, 2),
     preferSells: preferSells.slice(0, 2),
     stance,
+    confidence: normalizeConfidence(obj.confidence),
+    bearCase:
+      typeof obj.bearCase === "string" && obj.bearCase.trim()
+        ? obj.bearCase.trim().slice(0, 200)
+        : "n/a",
   };
 }
 

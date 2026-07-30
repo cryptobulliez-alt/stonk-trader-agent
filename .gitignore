@@ -9,6 +9,8 @@ data/portfolio-history.json
 data/portfolio-history.json.bak
 data/cost-basis.json
 data/trade-log.json
+data/cooldowns.json
+data/trade-memory.json
 .stonk-trader/
 *.log
 .DS_Store

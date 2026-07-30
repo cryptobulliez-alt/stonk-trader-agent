@@ -34,6 +34,7 @@ import {
 } from "./history.js";
 import {
   enrichHoldings,
+  enrichLedgerFills,
   getLedger,
 } from "./ledger.js";
 import { getLlmConnection, type LlmConnection } from "./llm.js";
@@ -270,6 +271,8 @@ async function handle(
           lastError,
           nextPassAt: schedule.nextPassAt,
           passInFlight: schedule.passInFlight,
+          signalWatch: schedule.signalWatch,
+          pendingWake: schedule.pendingWake,
         },
         balances,
         events: runtime.events,
@@ -420,7 +423,6 @@ async function handle(
       );
       // Seed / reconcile cost basis from marks, then attach P&L fields
       const holdings = enrichHoldings(tokenId, analysis.holdings, analysis.ethUsd);
-      const ledger = getLedger(tokenId);
 
       recordSnapshot({
         tokenId,
@@ -457,10 +459,17 @@ async function handle(
           fundingHint: analysis.fundingHint,
           disclaimer: analysis.disclaimer,
         },
-        ledger: {
-          fills: ledger.fills.slice(-40).reverse(),
-          positions: ledger.positions,
-        },
+        ledger: (() => {
+          const enriched = enrichLedgerFills(tokenId);
+          // Recent fills = swaps only (skip cost-basis seeds / zero-size rows)
+          const trades = enriched.fills.filter(
+            (f) => !f.seeded && f.qty > 0 && f.notionalUsd > 0,
+          );
+          return {
+            fills: trades.slice(-40).reverse(),
+            positions: enriched.positions,
+          };
+        })(),
       });
       return;
     }
