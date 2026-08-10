@@ -334,6 +334,40 @@ button {
   color: var(--accent);
 }
 
+.modal.modal-confirm {
+  width: min(420px, 100%);
+  max-height: none;
+}
+
+.confirm-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  background: #000;
+}
+
+.confirm-facts > div {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.confirm-facts dt {
+  margin: 0;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+}
+
+.confirm-facts dd {
+  margin: 0;
+  color: var(--text);
+}
+
 .modal-tools {
   display: flex;
   flex-wrap: wrap;
@@ -605,6 +639,18 @@ button {
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.btn.compact {
+  padding: 4px 8px;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.holdings-action {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
 }
 
 .log {

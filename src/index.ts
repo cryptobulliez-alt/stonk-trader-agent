@@ -4,6 +4,7 @@ import {
   cmdConnect,
   cmdManage,
   cmdPortfolio,
+  cmdSend,
   cmdTrade,
   cmdWatch,
 } from "./agent.js";
@@ -54,6 +55,35 @@ program
   .action(async (opts: { once: boolean }) => {
     await cmdWatch(opts.once);
   });
+
+program
+  .command("send")
+  .description(
+    "Send TBA ETH or ERC-20 inventory to a target wallet (escape hatch; honors settings dryRun)",
+  )
+  .requiredOption("--token <token>", "Asset: ETH, WETH, NVDA, …")
+  .requiredOption("--amount <amount>", 'Human amount, or "max"')
+  .requiredOption("--to <address>", "Destination 0x wallet")
+  .option(
+    "--allow-owner",
+    "Permit sending to the NFT owner EOA (explicit inventory removal)",
+    false,
+  )
+  .action(
+    async (opts: {
+      token: string;
+      amount: string;
+      to: string;
+      allowOwner: boolean;
+    }) => {
+      await cmdSend({
+        token: opts.token,
+        amount: opts.amount,
+        to: opts.to,
+        allowOwner: opts.allowOwner,
+      });
+    },
+  );
 
 program
   .command("manage")

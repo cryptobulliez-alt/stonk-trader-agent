@@ -616,6 +616,21 @@ function fmtWethPnl(
 }
 
 const CASH_SYMS = new Set(["WETH", "ETH", "USDG", "STONKBROKER"]);
+const SELL_SKIP_SYMS = new Set(["WETH", "ETH", "USDG"]);
+const DEFAULT_GAS_ETH_PER_STEP = 0.000012;
+
+/** Est. EOA gas $ for a full sell (~3 TBA steps). Button only when notional exceeds this. */
+function sellGasFloorUsd(
+  ethUsd: number | null | undefined,
+  gasEthPerStep?: number,
+) {
+  const per =
+    gasEthPerStep != null && gasEthPerStep > 0
+      ? gasEthPerStep
+      : DEFAULT_GAS_ETH_PER_STEP;
+  const eth = ethUsd != null && ethUsd > 0 ? ethUsd : 2000;
+  return per * 3 * eth;
+}
 
 function portfolioPnlSummary(
   portfolio: Portfolio,
@@ -815,6 +830,8 @@ export default function HomePage() {
   const [now, setNow] = useState(() => Date.now());
   const portfolioInflight = useRef(0);
   const tradesInflight = useRef(0);
+  const portfolioGen = useRef(0);
+  const statusGen = useRef(0);
   const prevTab = useRef<Tab | null>(null);
   const lastDashRefreshEventId = useRef<string | null>(null);
   const dashRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -824,6 +841,16 @@ export default function HomePage() {
   const [allowDraft, setAllowDraft] = useState<string[]>([]);
   const [allowFilter, setAllowFilter] = useState("");
   const [allowTradeableOnly, setAllowTradeableOnly] = useState(true);
+  const [sendToken, setSendToken] = useState("");
+  const [sendAmount, setSendAmount] = useState("");
+  const [sendTo, setSendTo] = useState("");
+  const [sendAllowOwner, setSendAllowOwner] = useState(false);
+  const [sendResult, setSendResult] = useState<string | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<
+    | null
+    | { kind: "sell"; symbol: string; amount: number; usd: number | null }
+    | { kind: "withdraw-all" }
+  >(null);
   const [xAccount, setXAccount] = useState<{
     id: string;
     name: string;
@@ -856,12 +883,15 @@ export default function HomePage() {
   }
 
   async function refreshStatus() {
+    const gen = ++statusGen.current;
     const s = await api<{ ok: true } & Status>("/api/status");
+    if (gen !== statusGen.current) return s;
     setStatus(s);
     setSettingsDraft((prev) => prev ?? s.settings);
     if (s.events?.length) {
       setEvents((prev) => mergeEvents(prev, s.events!));
     }
+    return s;
   }
 
   async function refreshBroker() {
@@ -869,16 +899,22 @@ export default function HomePage() {
     setBroker(res.broker);
   }
 
-  async function refreshPortfolio(opts?: { quiet?: boolean }) {
+  async function refreshPortfolio(opts?: {
+    quiet?: boolean;
+  }): Promise<({ ok: true } & Portfolio) | null> {
+    const gen = ++portfolioGen.current;
     if (!opts?.quiet) {
       portfolioInflight.current += 1;
       setLoadingPortfolio(true);
     }
     let tokenId: string | undefined;
+    let p: ({ ok: true } & Portfolio) | null = null;
     try {
-      const p = await api<{ ok: true } & Portfolio>("/api/portfolio");
-      setPortfolio(p);
-      setBroker(p.broker);
+      p = await api<{ ok: true } & Portfolio>("/api/portfolio");
+      if (gen === portfolioGen.current) {
+        setPortfolio(p);
+        setBroker(p.broker);
+      }
       tokenId = p.broker.tokenId;
     } finally {
       if (!opts?.quiet) {
@@ -887,19 +923,44 @@ export default function HomePage() {
       }
     }
     // History is secondary — don't keep the refresh indicator waiting on it
-    if (tokenId) {
+    if (tokenId && gen === portfolioGen.current) {
       void refreshHistory(tokenId).catch(() => undefined);
     }
+    return gen === portfolioGen.current ? p : null;
   }
 
   /** After a fill / pass: refresh stats, holdings, charts, logs, balances (debounced). */
   function scheduleDashboardRefresh() {
     if (dashRefreshTimer.current) clearTimeout(dashRefreshTimer.current);
     dashRefreshTimer.current = setTimeout(() => {
-      void refreshStatus().catch(() => undefined);
-      void refreshPortfolio({ quiet: true }).catch(() => undefined);
-      void refreshTrades(undefined, { quiet: true }).catch(() => undefined);
+      void refreshDashboard().catch(() => undefined);
     }, 350);
+  }
+
+  /** Immediate full refresh — use after manual sell / send / withdraw. */
+  async function refreshDashboard(opts?: { expectSold?: string }) {
+    if (dashRefreshTimer.current) {
+      clearTimeout(dashRefreshTimer.current);
+      dashRefreshTimer.current = null;
+    }
+    const [, portfolioSnap] = await Promise.all([
+      refreshStatus().catch(() => undefined),
+      refreshPortfolio().catch(() => null),
+      refreshTrades(undefined, { quiet: true }).catch(() => undefined),
+    ]);
+    // Chain index can lag a beat after broadcast — retry once if sold name still shows size
+    if (opts?.expectSold) {
+      const left = portfolioSnap?.analysis.holdings.find(
+        (h) => h.symbol.toUpperCase() === opts.expectSold!.toUpperCase(),
+      );
+      if (left && left.amount > 1e-6) {
+        await new Promise((r) => setTimeout(r, 1_200));
+        await Promise.all([
+          refreshPortfolio({ quiet: true }).catch(() => null),
+          refreshStatus().catch(() => undefined),
+        ]);
+      }
+    }
   }
 
   async function refreshHistory(tokenId?: string) {
@@ -1240,6 +1301,140 @@ export default function HomePage() {
       goTab("live");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function executeSend() {
+    const token =
+      sendToken || portfolio?.analysis.holdings[0]?.symbol || "";
+    if (!token || !sendAmount || !sendTo) {
+      setError("Send requires asset, amount, and destination");
+      return;
+    }
+    if (!sendToken) setSendToken(token);
+    setBusy("transfer");
+    setError(null);
+    setSendResult(null);
+    try {
+      const res = await api<{
+        ok: true;
+        dryRun: boolean;
+        transfer: {
+          token: string;
+          amount: string;
+          to: string;
+          toOwner: boolean;
+          warning: string | null;
+        };
+        results: Array<{ what: string; hash: string; dryRun: boolean }>;
+      }>("/api/transfer/execute", {
+        method: "POST",
+        body: JSON.stringify({
+          token,
+          amount: sendAmount,
+          to: sendTo.trim(),
+          allowOwner: sendAllowOwner,
+        }),
+      });
+      const hashes = res.results
+        .map((r) => (r.dryRun ? "dry-run" : r.hash))
+        .join(", ");
+      setSendResult(
+        `${res.dryRun ? "[dry-run] " : ""}Sent ${res.transfer.amount} ${res.transfer.token} → ${shortAddr(res.transfer.to)}${hashes ? ` · ${hashes}` : ""}`,
+      );
+      await refreshDashboard();
+      goTab("live");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function requestWithdrawAll() {
+    setConfirmDialog({ kind: "withdraw-all" });
+  }
+
+  function requestManualSell(
+    symbol: string,
+    amount: number,
+    usd: number | null,
+  ) {
+    setConfirmDialog({ kind: "sell", symbol, amount, usd });
+  }
+
+  async function executeWithdrawAll() {
+    setBusy("withdraw-all");
+    setError(null);
+    setSendResult(null);
+    try {
+      const res = await api<{
+        ok: true;
+        dryRun: boolean;
+        withdrawAll: {
+          to: string;
+          items: Array<{ token: string; amount: string }>;
+          warning: string;
+        };
+        results: Array<{ what: string; hash: string; dryRun: boolean }>;
+      }>("/api/transfer/withdraw-all", {
+        method: "POST",
+        body: "{}",
+      });
+      const summary = res.withdrawAll.items
+        .map((i) => `${i.amount} ${i.token}`)
+        .join(", ");
+      const hashes = res.results
+        .map((r) => (r.dryRun ? "dry-run" : r.hash))
+        .join(", ");
+      setSendResult(
+        `${res.dryRun ? "[dry-run] " : ""}Withdrew ${summary || "nothing"} → ${shortAddr(res.withdrawAll.to)}${hashes ? ` · ${hashes}` : ""}`,
+      );
+      setConfirmDialog(null);
+      await refreshDashboard();
+      goTab("live");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setConfirmDialog(null);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function executeManualSell(symbol: string) {
+    setBusy(`sell:${symbol}`);
+    setError(null);
+    try {
+      const res = await api<{
+        ok: true;
+        dryRun: boolean;
+        sell: {
+          token: string;
+          amountIn: string;
+          tokenOut: string;
+          notionalUsd: number;
+        };
+        results: Array<{ what: string; hash: string; dryRun: boolean }>;
+      }>("/api/trade/sell", {
+        method: "POST",
+        body: JSON.stringify({ token: symbol }),
+      });
+      const hashes = res.results
+        .map((r) => (r.dryRun ? "dry-run" : r.hash))
+        .join(", ");
+      setSendResult(
+        `${res.dryRun ? "[dry-run] " : ""}Sold ${res.sell.amountIn} ${res.sell.token} → WETH ($${res.sell.notionalUsd.toFixed(2)})${hashes ? ` · ${hashes}` : ""}`,
+      );
+      setConfirmDialog(null);
+      await refreshDashboard({
+        expectSold: res.dryRun ? undefined : res.sell.token,
+      });
+      goTab("live");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setConfirmDialog(null);
     } finally {
       setBusy("");
     }
@@ -1717,6 +1912,7 @@ export default function HomePage() {
                         <th>USD</th>
                         <th>P&amp;L (WETH)</th>
                         <th>Weight</th>
+                        <th />
                       </tr>
                     </thead>
                     <tbody>
@@ -1724,6 +1920,16 @@ export default function HomePage() {
                         const isCash = ["WETH", "ETH", "USDG"].includes(
                           h.symbol,
                         );
+                        const gasFloor = sellGasFloorUsd(
+                          portfolio.analysis.ethUsd ??
+                            status?.balances?.ethUsd,
+                          status?.settings.estimateGasEth ??
+                            settingsDraft?.estimateGasEth,
+                        );
+                        const canSell =
+                          !SELL_SKIP_SYMS.has(h.symbol) &&
+                          h.amount > 0 &&
+                          (h.usd ?? 0) > gasFloor;
                         const pnl = isCash
                           ? { text: "—", cls: "pnl-flat" }
                           : fmtWethPnl(
@@ -1731,6 +1937,7 @@ export default function HomePage() {
                               h.unrealizedPnlWethPct ?? h.unrealizedPnlPct,
                             );
                         const mark = h.markUsd ?? h.priceUsd;
+                        const selling = busy === `sell:${h.symbol}`;
                         return (
                           <tr key={h.symbol}>
                             <td>
@@ -1778,11 +1985,152 @@ export default function HomePage() {
                               ) : null}
                             </td>
                             <td>{(h.weightPct ?? 0).toFixed(1)}%</td>
+                            <td className="holdings-action">
+                              {canSell ? (
+                                <button
+                                  className="btn compact"
+                                  type="button"
+                                  disabled={Boolean(busy)}
+                                  title={`Sell full ${h.symbol} balance → WETH (notional > ~$${gasFloor.toFixed(2)} gas)`}
+                                  onClick={() =>
+                                    requestManualSell(
+                                      h.symbol,
+                                      h.amount,
+                                      h.usd,
+                                    )
+                                  }
+                                >
+                                  {selling
+                                    ? "…"
+                                    : status?.settings.dryRun ||
+                                        settingsDraft?.dryRun
+                                      ? "Dry sell"
+                                      : "Sell"}
+                                </button>
+                              ) : null}
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
+
+                  <h2 style={{ marginTop: 18 }}>Send</h2>
+                  <p className="sub" style={{ marginBottom: 10 }}>
+                    Move TBA inventory to an external wallet. Owner pays gas.
+                    Default blocks TBA → owner EOA (check override if you mean it).
+                    Honors Dry run.
+                  </p>
+                  <div className="form-grid">
+                    <div className="field">
+                      <label>Asset</label>
+                      <select
+                        value={
+                          sendToken ||
+                          portfolio.analysis.holdings[0]?.symbol ||
+                          ""
+                        }
+                        onChange={(e) => setSendToken(e.target.value)}
+                      >
+                        {portfolio.analysis.holdings.map((h) => (
+                          <option key={h.symbol} value={h.symbol}>
+                            {h.symbol} ({h.amount.toFixed(6)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>Amount</label>
+                      <input
+                        value={sendAmount}
+                        onChange={(e) => setSendAmount(e.target.value)}
+                        placeholder='e.g. 0.01 or "max"'
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="field full">
+                      <label>To</label>
+                      <input
+                        value={sendTo}
+                        onChange={(e) => setSendTo(e.target.value)}
+                        placeholder="0x…"
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="field full">
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          textTransform: "none",
+                          letterSpacing: 0,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sendAllowOwner}
+                          onChange={(e) => setSendAllowOwner(e.target.checked)}
+                        />
+                        Allow send to owner EOA
+                      </label>
+                    </div>
+                  </div>
+                  <div className="btn-row" style={{ marginTop: 12 }}>
+                    <button
+                      className="btn primary"
+                      type="button"
+                      disabled={
+                        busy === "transfer" ||
+                        busy === "withdraw-all" ||
+                        !sendAmount ||
+                        !sendTo
+                      }
+                      onClick={() => void executeSend()}
+                    >
+                      {busy === "transfer"
+                        ? "Sending…"
+                        : status?.settings.dryRun || settingsDraft?.dryRun
+                          ? "Dry-run send"
+                          : "Send"}
+                    </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={!sendToken && !portfolio.analysis.holdings[0]}
+                      onClick={() => setSendAmount("max")}
+                    >
+                      Max
+                    </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={
+                        busy === "transfer" ||
+                        busy === "withdraw-all" ||
+                        !(
+                          (portfolio.analysis.contentsUsd ?? 0) > 0 ||
+                          portfolio.analysis.holdings.some((h) => h.amount > 0)
+                        )
+                      }
+                      onClick={requestWithdrawAll}
+                      title="Send every TBA asset (ETH + tokens) to the owner EOA"
+                    >
+                      {busy === "withdraw-all"
+                        ? "Withdrawing…"
+                        : status?.settings.dryRun || settingsDraft?.dryRun
+                          ? "Dry-run withdraw all → EOA"
+                          : "Withdraw all → EOA"}
+                    </button>
+                  </div>
+                  {sendResult ? (
+                    <p className="sub" style={{ marginTop: 10 }}>
+                      {sendResult}
+                    </p>
+                  ) : null}
+
                   {portfolio.ledger?.fills && portfolio.ledger.fills.length > 0 && (
                     <>
                       <h2 style={{ marginTop: 18 }}>Recent fills</h2>
@@ -2797,6 +3145,111 @@ export default function HomePage() {
           </span>
         </div>
       </div>
+
+      {confirmDialog && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => !busy && setConfirmDialog(null)}
+        >
+          <div
+            className="modal modal-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              confirmDialog.kind === "sell" ? "Confirm sell" : "Confirm withdraw"
+            }
+            onClick={(e) => e.stopPropagation()}
+          >
+            {confirmDialog.kind === "sell" ? (
+              <>
+                <h2>
+                  {status?.settings.dryRun || settingsDraft?.dryRun
+                    ? "Dry-run sell"
+                    : "Confirm sell"}
+                </h2>
+                <p className="sub" style={{ margin: "0 0 12px" }}>
+                  Sell the full TBA balance of{" "}
+                  <strong>{confirmDialog.symbol}</strong> into WETH. Proceeds
+                  stay in the TBA; owner pays gas.
+                </p>
+                <dl className="confirm-facts">
+                  <div>
+                    <dt>Token</dt>
+                    <dd>{confirmDialog.symbol}</dd>
+                  </div>
+                  <div>
+                    <dt>Amount</dt>
+                    <dd>{confirmDialog.amount.toFixed(6)}</dd>
+                  </div>
+                  <div>
+                    <dt>Est. USD</dt>
+                    <dd>
+                      {confirmDialog.usd != null
+                        ? `$${confirmDialog.usd.toFixed(2)}`
+                        : "—"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Out</dt>
+                    <dd>WETH (TBA)</dd>
+                  </div>
+                </dl>
+              </>
+            ) : (
+              <>
+                <h2>
+                  {status?.settings.dryRun || settingsDraft?.dryRun
+                    ? "Dry-run withdraw"
+                    : "Confirm withdraw"}
+                </h2>
+                <p className="sub" style={{ margin: "0 0 12px" }}>
+                  Send <strong>all</strong> TBA assets (ETH + tokens) to the
+                  owner EOA. This empties the TBA — not a trade path. Owner pays
+                  gas.
+                </p>
+              </>
+            )}
+            <div className="modal-foot">
+              <span className="sub" style={{ margin: 0 }}>
+                {status?.settings.dryRun || settingsDraft?.dryRun
+                  ? "Dry run is ON — no broadcast"
+                  : "Live — will broadcast"}
+              </span>
+              <div className="btn-row">
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={Boolean(busy)}
+                  onClick={() => setConfirmDialog(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn primary"
+                  type="button"
+                  disabled={Boolean(busy)}
+                  onClick={() => {
+                    if (confirmDialog.kind === "sell") {
+                      void executeManualSell(confirmDialog.symbol);
+                    } else {
+                      void executeWithdrawAll();
+                    }
+                  }}
+                >
+                  {busy
+                    ? "Working…"
+                    : status?.settings.dryRun || settingsDraft?.dryRun
+                      ? "Run dry-run"
+                      : confirmDialog.kind === "sell"
+                        ? "Sell"
+                        : "Withdraw all"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {allowModalOpen && (
         <div

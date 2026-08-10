@@ -1,10 +1,21 @@
 import "dotenv/config";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { formatEther } from "viem";
+import { formatEther, formatUnits } from "viem";
+
+// viem HTTP transport needs global fetch/Request (Node ≥18; project requires ≥20).
+const nodeMajor = Number(process.versions.node.split(".")[0] || 0);
+if (nodeMajor < 20 || typeof globalThis.Request !== "function") {
+  console.error(
+    `[shell] Node ${process.version} is too old (need ≥20 with fetch/Request).\n` +
+      `  This process: ${process.execPath}\n` +
+      `  Fix: nvm use 20+ (or ensure nvm's node is first on PATH), then restart.`,
+  );
+  process.exit(1);
+}
 import { stonkBrokersAbi } from "../abis.js";
 import { listStockAssets } from "../assets.js";
 import { getVenueForSymbol, loadVenueMap, venueBadge } from "../venueMap.js";
-import { makePublicClient } from "../brokerReads.js";
+import { getBroker, makePublicClient } from "../brokerReads.js";
 import { getXAccount, postTextToX, type XAccountInfo } from "../twitter.js";
 import { formatStonkSwapTweet } from "../swap.js";
 import { loadConfig, loadEnvStatus, ownerAccount, STONKBROKERS_ADDRESS } from "../config.js";
@@ -13,6 +24,11 @@ import {
   fetchBrokerArt,
 } from "../portfolioManage.js";
 import { connectBroker } from "../tba.js";
+import { prepareBrokerTrade } from "../brokerPrepare.js";
+import {
+  prepareTbaTransfer,
+  prepareTbaWithdrawAll,
+} from "../tbaTransfer.js";
 import {
   getAutopilotSchedule,
   pauseAutopilot,
@@ -21,7 +37,9 @@ import {
   startAutopilot,
   stopAutopilot,
 } from "./autopilot.js";
+import { executePreparedSteps } from "./executeSteps.js";
 import {
+  emitEvent,
   getRecentEvents,
   snapshotRuntime,
   subscribe,
@@ -36,6 +54,7 @@ import {
   enrichHoldings,
   enrichLedgerFills,
   getLedger,
+  recordActionFill,
 } from "./ledger.js";
 import { getLlmConnection, type LlmConnection } from "./llm.js";
 import { loadSettings, saveSettings, type ShellSettings } from "./settings.js";
@@ -43,10 +62,16 @@ import {
   backfillTradeFees,
   importTbaTradesFromExplorer,
   listTrades,
+  recordTrade,
   tradeTotals,
 } from "./tradeLog.js";
-import { getEthUsd } from "../prices.js";
-import { evaluateEoaGasReserve, type EoaGasWarn } from "./tradeEconomics.js";
+import { getEthUsd, priceTokenUsd } from "../prices.js";
+import {
+  estimateTradeCostUsd,
+  evaluateEoaGasReserve,
+  stepsHintForSide,
+  type EoaGasWarn,
+} from "./tradeEconomics.js";
 
 const PORT = Number(process.env.SHELL_PORT || 8788);
 
@@ -561,6 +586,305 @@ async function handle(
     if (method === "POST" && path === "/api/agent/once") {
       void runOnce();
       json(res, 200, { ok: true, started: true });
+      return;
+    }
+
+    if (method === "POST" && path === "/api/transfer/prepare") {
+      const raw = await readBody(req);
+      const body = JSON.parse(raw || "{}") as {
+        token?: string;
+        amount?: string;
+        to?: string;
+        allowOwner?: boolean;
+      };
+      if (!body.token || !body.amount || !body.to) {
+        json(res, 400, {
+          ok: false,
+          error: "token, amount, and to are required",
+        });
+        return;
+      }
+      const config = loadConfig();
+      const session = await connectBroker(config);
+      const prepared = await prepareTbaTransfer(
+        makePublicClient(config.rpcUrl),
+        {
+          id: Number(session.tokenId),
+          from: session.nftOwner,
+          token: body.token,
+          amount: body.amount,
+          to: body.to,
+          allowOwner: Boolean(body.allowOwner),
+        },
+      );
+      emitEvent(
+        "agent.info",
+        `Prepared send ${prepared.amount} ${prepared.token} → ${prepared.recipient}`,
+        { engine: prepared.engine, toOwner: prepared.toOwner },
+      );
+      json(res, 200, prepared);
+      return;
+    }
+
+    if (method === "POST" && path === "/api/transfer/execute") {
+      const raw = await readBody(req);
+      const body = JSON.parse(raw || "{}") as {
+        token?: string;
+        amount?: string;
+        to?: string;
+        allowOwner?: boolean;
+      };
+      if (!body.token || !body.amount || !body.to) {
+        json(res, 400, {
+          ok: false,
+          error: "token, amount, and to are required",
+        });
+        return;
+      }
+      const config = loadConfig();
+      const settings = loadSettings();
+      config.dryRun = settings.dryRun;
+      const session = await connectBroker(config);
+      const prepared = await prepareTbaTransfer(
+        makePublicClient(config.rpcUrl),
+        {
+          id: Number(session.tokenId),
+          from: session.nftOwner,
+          token: body.token,
+          amount: body.amount,
+          to: body.to,
+          allowOwner: Boolean(body.allowOwner),
+        },
+      );
+      if (prepared.warning) {
+        emitEvent("agent.warn", prepared.warning);
+      }
+      emitEvent(
+        "agent.info",
+        `${settings.dryRun ? "[dry-run] " : ""}Sending ${prepared.amount} ${prepared.token} → ${prepared.recipient}`,
+        { toOwner: prepared.toOwner },
+      );
+      const results = await executePreparedSteps(session, prepared.steps);
+      balancesCache = null;
+      json(res, 200, {
+        ok: true,
+        dryRun: settings.dryRun,
+        transfer: {
+          token: prepared.token,
+          amount: prepared.amount,
+          to: prepared.recipient,
+          toOwner: prepared.toOwner,
+          warning: prepared.warning ?? null,
+        },
+        results,
+      });
+      return;
+    }
+
+    if (method === "POST" && path === "/api/transfer/withdraw-all") {
+      const config = loadConfig();
+      const settings = loadSettings();
+      config.dryRun = settings.dryRun;
+      const session = await connectBroker(config);
+      const prepared = await prepareTbaWithdrawAll(
+        makePublicClient(config.rpcUrl),
+        {
+          id: Number(session.tokenId),
+          from: session.nftOwner,
+        },
+      );
+      emitEvent("agent.warn", prepared.warning);
+      emitEvent(
+        "agent.info",
+        `${settings.dryRun ? "[dry-run] " : ""}Withdrawing ${prepared.items.length} asset(s) TBA → owner EOA`,
+        {
+          to: prepared.recipient,
+          items: prepared.items.map((i) => `${i.amount} ${i.token}`),
+        },
+      );
+      const results = await executePreparedSteps(session, prepared.steps);
+      balancesCache = null;
+      json(res, 200, {
+        ok: true,
+        dryRun: settings.dryRun,
+        withdrawAll: {
+          to: prepared.recipient,
+          items: prepared.items,
+          warning: prepared.warning,
+        },
+        results,
+      });
+      return;
+    }
+
+    if (method === "POST" && path === "/api/trade/sell") {
+      const raw = await readBody(req);
+      const body = JSON.parse(raw || "{}") as { token?: string };
+      const token = (body.token ?? "").trim().toUpperCase();
+      if (!token) {
+        json(res, 400, { ok: false, error: "token is required" });
+        return;
+      }
+      if (["WETH", "ETH", "USDG"].includes(token)) {
+        json(res, 400, {
+          ok: false,
+          error: `${token} is cash — nothing to sell into WETH`,
+        });
+        return;
+      }
+
+      const config = loadConfig();
+      const settings = loadSettings();
+      config.dryRun = settings.dryRun;
+      const session = await connectBroker(config);
+      const client = makePublicClient(config.rpcUrl);
+      const tokenId = String(session.tokenId);
+      const broker = await getBroker(client, Number(session.tokenId));
+      const holding = broker.holdings.find(
+        (h) => h.symbol.toUpperCase() === token,
+      );
+      if (!holding || BigInt(holding.amountRaw) <= 0n) {
+        json(res, 400, {
+          ok: false,
+          error: `TBA has no ${token} balance to sell`,
+        });
+        return;
+      }
+
+      const ethUsd = await getEthUsd(client).catch(() => null);
+      const priced = await priceTokenUsd(
+        client,
+        holding.token as `0x${string}`,
+        holding.symbol,
+        holding.decimals,
+        ethUsd,
+      );
+      const notionalUsd =
+        priced.usd != null && priced.usd > 0
+          ? holding.amount * priced.usd
+          : 0;
+      const cost = estimateTradeCostUsd({
+        side: "sell",
+        notionalUsd: Math.max(notionalUsd, 0),
+        ethUsd,
+        slippageBps: 100,
+        minEdgeBps: settings.minEdgeBps,
+        gasEthPerStep: settings.estimateGasEth,
+        tokenId,
+        stepsHint: stepsHintForSide("sell"),
+        roundTrip: false,
+      });
+      if (!(notionalUsd > cost.gasUsd)) {
+        json(res, 400, {
+          ok: false,
+          error: `${token} notional $${notionalUsd.toFixed(2)} ≤ est. sell gas $${cost.gasUsd.toFixed(2)}`,
+        });
+        return;
+      }
+
+      const amountIn = formatUnits(
+        BigInt(holding.amountRaw),
+        holding.decimals,
+      );
+      const prepared = await prepareBrokerTrade(client, {
+        id: Number(session.tokenId),
+        from: session.nftOwner,
+        tokenIn: token,
+        tokenOut: "WETH",
+        amountIn,
+        preferVenue: settings.swapVenue,
+      });
+      const steps = (prepared.steps as Array<{
+        to: string;
+        data: string;
+        value?: string;
+        what?: string;
+        step?: string;
+      }>) ?? (prepared.swap ? [prepared.swap as never] : []);
+      if (!steps.length) {
+        json(res, 400, {
+          ok: false,
+          error: `No swap steps prepared for ${token}→WETH`,
+        });
+        return;
+      }
+
+      const reason = `Manual sell full ${token} balance → WETH`;
+      emitEvent(
+        "agent.info",
+        `${settings.dryRun ? "[dry-run] " : ""}${reason} (${amountIn})`,
+        { notionalUsd, gasUsd: cost.gasUsd },
+      );
+
+      const results = await executePreparedSteps(session, steps);
+      const action = {
+        side: "sell" as const,
+        tokenIn: token,
+        tokenOut: "WETH",
+        amountIn,
+        notionalUsd,
+        reason,
+      };
+      const marks: Record<string, number | null> = {
+        WETH: ethUsd,
+        ETH: ethUsd,
+        [token]: priced.usd,
+      };
+      recordTrade({
+        tokenId,
+        side: "sell",
+        tokenIn: token,
+        tokenOut: "WETH",
+        amountIn,
+        notionalUsd,
+        reason,
+        dryRun: settings.dryRun,
+        status: settings.dryRun ? "dry_run" : "filled",
+        ethUsd,
+        txs: results.map((r) => ({
+          what: r.what,
+          hash: r.hash,
+          dryRun: r.dryRun,
+          valueEth: r.valueEth,
+          gasUsed: r.gasUsed,
+          effectiveGasPriceWei: r.effectiveGasPriceWei,
+          gasFeeEth: r.gasFeeEth,
+        })),
+      });
+      if (!settings.dryRun) {
+        recordActionFill({
+          tokenId,
+          action,
+          marks,
+          dryRun: false,
+          ethUsd,
+        });
+      }
+      emitEvent(
+        settings.dryRun ? "agent.dry_run" : "agent.fill",
+        `${settings.dryRun ? "[dry-run] " : ""}Sold ${amountIn} ${token} → WETH`,
+        {
+          side: "sell",
+          tokenIn: token,
+          tokenOut: "WETH",
+          amountIn,
+          notionalUsd,
+          dryRun: settings.dryRun,
+        },
+      );
+      balancesCache = null;
+      json(res, 200, {
+        ok: true,
+        dryRun: settings.dryRun,
+        sell: {
+          token,
+          amountIn,
+          tokenOut: "WETH",
+          notionalUsd: +notionalUsd.toFixed(4),
+          gasUsd: cost.gasUsd,
+        },
+        results,
+      });
       return;
     }
 

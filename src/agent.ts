@@ -5,8 +5,11 @@ import {
   analyzeBrokerPortfolio,
   type ManagePolicy,
 } from "./portfolioManage.js";
+import { executePreparedSteps } from "./shell/executeSteps.js";
+import { loadSettings } from "./shell/settings.js";
 import { executeTrade, formatTradeTweet, type TradeRequest } from "./swap.js";
 import { connectBroker, sessionSummary, type BrokerSession } from "./tba.js";
+import { prepareTbaTransfer } from "./tbaTransfer.js";
 import { postTradeToX } from "./twitter.js";
 import { runWatcherLoop, watchAndPost } from "./watcher.js";
 
@@ -57,6 +60,46 @@ export async function cmdWatch(once: boolean): Promise<void> {
     return;
   }
   await runWatcherLoop(session);
+}
+
+export async function cmdSend(opts: {
+  token: string;
+  amount: string;
+  to: string;
+  allowOwner?: boolean;
+}): Promise<void> {
+  const config = loadConfig();
+  const settings = loadSettings();
+  config.dryRun = settings.dryRun;
+  const session = await connectBroker(config);
+  console.log(sessionSummary(session));
+
+  const prepared = await prepareTbaTransfer(
+    makePublicClient(session.config.rpcUrl),
+    {
+      id: Number(session.tokenId),
+      from: session.nftOwner,
+      token: opts.token,
+      amount: opts.amount,
+      to: opts.to,
+      allowOwner: Boolean(opts.allowOwner),
+    },
+  );
+  if (prepared.warning) {
+    console.warn(`\n⚠ ${prepared.warning}`);
+  }
+  console.log(
+    `\n${settings.dryRun ? "[dry-run] " : ""}Send ${prepared.amount} ${prepared.token} → ${prepared.recipient}`,
+  );
+
+  const results = await executePreparedSteps(session, prepared.steps);
+  for (const r of results) {
+    console.log(
+      r.dryRun
+        ? `  [dry-run] ${r.what}`
+        : `  ${r.what} — ${r.hash}`,
+    );
+  }
 }
 
 export async function cmdManage(opts: {

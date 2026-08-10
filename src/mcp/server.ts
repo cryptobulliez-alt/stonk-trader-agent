@@ -16,6 +16,7 @@ import {
 } from "../portfolioManage.js";
 import { executeTrade, formatTradeTweet } from "../swap.js";
 import { connectBroker } from "../tba.js";
+import { prepareTbaTransfer } from "../tbaTransfer.js";
 import { postTextToX, postTradeToX } from "../twitter.js";
 
 function jsonResult(data: unknown) {
@@ -228,6 +229,29 @@ export function createStonkBrokerMcpServer(): McpServer {
     async (args) => {
       try {
         return jsonResult(await prepareBrokerTrade(client(), args));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.tool(
+    "prepare_tba_transfer",
+    "VERIFICATION-GATED: UNSIGNED TBA txs to send ETH or ERC-20 inventory from the TBA to an external wallet. Escape hatch / inventory removal — not a trade path. Refuses TBA→owner EOA unless allowOwner=true. Output leaves the TBA.",
+    {
+      id: z.number().int().min(1).max(4444),
+      from: z.string().describe("REQUIRED: current NFT owner (verified against ownerOf)"),
+      token: z.string().describe("Symbol or address (ETH, WETH, NVDA, …)"),
+      amount: z.string().describe('Human-readable amount, or "max"'),
+      to: z.string().describe("Destination 0x wallet"),
+      allowOwner: z
+        .boolean()
+        .optional()
+        .describe("Permit sending to the NFT owner EOA (default false)"),
+    },
+    async (args) => {
+      try {
+        return jsonResult(await prepareTbaTransfer(client(), args));
       } catch (err) {
         return errorResult(err);
       }
